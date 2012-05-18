@@ -1,0 +1,64 @@
+Here is the recipe to use these scripts:
+First ensure you have these installed on your host:
+vim bison patch gawk dialog subversion xml2 xsltproc libxml2-utils and tidy
+You can also change the dialog menus by using a .dialogrc in your root dir.
+go to: bash.cyberciti.biz/guide/Dialog_customization_with_configuration_file
+If you need the dialog source, it is here: ftp://invisible-island.net/dialog
+- use the tar.gz version.
+
+1. create your partitions. I suggest you do:
+mkfs.ext4 /dev/sda(x) for all of them - plus mkswap /dev/sda(x)
+
+2. Edit chapter02.sh to match your partitions and run the script
+3. Same with chapter03.sh
+
+4. Copy the files: lfs-Makefile.patch and pkguser.tar.xz to $LFS/sources
+Don't change these names. They are hardwired into the lfsa script.
+
+5. copy lfsa to $LFS
+
+6. Create a lfs user as per the book. Don't forget to set up the lfs 
+environment too. Do: echo $LFS_TGT and make sure something is
+returned.
+
+7. Run lfsa as root.  Edit the config file to suit. If requested, the
+sources will be downloaded, the requested LFS book svn'd and the following scripts created in $LFS - chapter05.sh, chapter06-asroot.sh, chapter06-chroot.sh,
+chapter06.sh and lastly chapter08.sh. Copy chapter07.sh to $LFS and edit to match your environment. Run the scripts in chapter order. Run chapter05.sh as user lfs; all the others as root.
+
+The scripts have been tested with  LFS version 7.1 and 'Current Development'. You
+don't need the patch with 'Current Development'. Older versions may
+break - they haven't been tested.
+
+chapter08.sh creates a placeholder to build the kernel.
+
+When the scripts have finished, follow chapter 8 from the book to
+install the kernel. Do su kernel to enter the kernel dir. mkproper has already
+been run. I've included a .config file here if you need one.
+
+The package-user management system uses three main scripts:-
+
+installpkg, listpkg and delpkg
+
+To install a new package, do: installpkg pkg-name. By default the
+package user directory is created under /usr/src/core. You can change
+it - just edit installpkg in /usr/sbin/. You can also do: 
+installpkg pkg-name install-dir to override the default dir.
+
+Additionally, you can also do: installpkg pkg-name install-dir uid 
+to specify the user id number. By default the uid starts at 10000 and
+increments with each package added. You can override this by specifying the uid. 
+This is useful for packages such as apache and avahi which have suggested uids
+in the blfs book.
+
+Before you delete a package with delpkg, use listpkg to see which files will go.
+delpkg pkg-name will delete all files owned by pkg-name. You have been warned.
+
+To do maintenance on a package do: su pkg-name. So to install the kernel, do 
+su kernel and it will take you to /usr/src/core/kernel where the source file is
+already untared and mkproper already run. Just add your .config file, make and
+install the kernel.
+
+If you decide to run the tests, you may well find that the gcc tests fail. I got
+21 failures with libmudflap and this stopped the script running. You'll have to
+restart the script with the tests set to no. Do this in the config file edit at
+the start of the lfsa script.

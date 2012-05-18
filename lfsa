@@ -1,0 +1,1571 @@
+#!/bin/bash
+#
+LFS=$LFS
+if [[ ! -d $LFS || "$LFS" = "" ]]; then
+  echo "'$LFS' is not a directory"
+  echo "do: export LFS=/mnt/lfs"
+  echo
+  exit 1
+fi
+
+# make sure there is a tools dir, and a symlink to it
+if [ -e $LFS/tools -a ! -d $LFS/tools ]; then
+  echo "$LFS/tools is not a directory"
+  mv -v $LFS/tools $LFS/tools.backup
+  echo "moved to $LFS/tools.backup"
+  echo "create directory $LFS/tools"
+  install -vd $LFS/tools
+fi
+if [ "$LFS/tools" != "$( ls -l /tools | awk '{print $NF}' )" ]; then
+  echo "/tools is not a symlink to $LFS/tools"
+  echo ""
+  echo "as root, do:"
+  echo ""
+  echo " ln -s $LFS/tools /tools"
+  exit 1
+fi
+# repository will be for LFS
+REPO="LFS"
+DumpedCommands=$LFS/lfs-commands
+Dumpedhtml=$LFS/lfs-html
+
+WgetOpts="" # Options for wget, e.g. proxy settings etc
+RETURN_PARAM=251  # return parameter from a function on error
+# these are relative to newly installed lfs ( i.e. without $LFS prefix )
+sourcedir=/sources
+builddir05=/build # chapter 5 build dir
+PkgUserDir=/usr/src/core
+
+BuildLog=$LFS/LFS-buildlog.log # keep a record of packages and times
+if [ ! -e $BuildLog ]; then
+  touch $BuildLog
+  chown lfs:lfs $BuildLog #make lfs the owner
+fi
+
+cfg=~/LFS.conf # config file to hold required params
+#initialize the config variables
+TZ=$TZ
+PAPER_SIZE=$PAPER_SIZE
+LFS_BOOK_LOC_DIR=$HOME/LFS_SVN/$REPO # def local dir for the downloaded book xml
+SVN_URL="svn://svn.linuxfromscratch.org/$REPO/" #svn url
+BOOK_VERSION="blank"
+SOURCES=$SOURCES
+BOOK=$BOOK
+TESTS=$TESTS
+
+if [ -e $cfg ]; then
+  source $cfg # exists so source it
+else
+  touch $cfg #cfg is new
+  if [ -z $TZ ]; then #null
+    TZ="America/Chicago"
+  fi
+  if [ -z $PAPER_SIZE ]; then #null
+    PAPER_SIZE="letter"
+  fi
+  if [ -z $BOOK ]; then
+    BOOK="svn"
+  fi
+  if [ -z $SOURCES ]; then
+    SOURCES="download"
+  fi
+  if [ -z $TESTS ]; then #null
+    TESTS="no"
+  fi
+# store the values in the new config file
+  echo "TZ=$TZ" | tee $cfg 
+  echo "PAPER_SIZE=$PAPER_SIZE" | tee -a $cfg
+  echo "LFS_BOOK_LOC_DIR=$HOME/LFS_SVN/$REPO" | tee -a $cfg
+  echo "SVN_URL=svn://svn.linuxfromscratch.org/$REPO/" | tee -a $cfg
+  echo "BOOK_VERSION=blank" | tee -a $cfg
+  echo "SOURCES=$SOURCES" | tee -a $cfg
+  echo "BOOK=$BOOK" | tee -a $cfg
+  echo "TESTS=$TESTS" | tee -a $cfg
+fi
+#
+# functions
+#
+configEdit () {
+tempfile1=dialog_1
+tempfile2=dialog_2
+tempfile3=dialog_3
+DIALOG=dialog # could set to gui dialog - xdialog, if availale
+#test -n "$DISPLAY" && DIALOG=xdialog
+# delete temp files on exit
+trap "rm -f $tempfile1 $tempfile2 $tempfile3" 0 1 2 5 15
+
+_edit () {
+   items=$(awk -F\= '{print $1,$2}' $cfg)
+   $DIALOG --title "" \
+          --menu "LFS config file editor:" 0 0 0 $items 2> $tempfile1
+
+   retval=$?
+   parameter=$(cat $tempfile1)
+
+   [ $retval -eq 0 ] && tochange=$parameter || return 1
+   if [ $tochange = "TZ" ]; then
+     display="Enter your local time zone. (If not known, run tzselect)"
+   elif [ $tochange = "PAPER_SIZE" ]; then
+     display="Probably letter or A4"
+   elif [ $tochange = "LFS_BOOK_LOC_DIR" ]; then
+     display="Enter the local directory to store the LFS Book"
+   elif [ $tochange = "SVN_URL" ]; then
+     display="Enter the svn url of the LFS book"
+   elif [ $tochange = "BOOK_VERSION" ]; then
+     display="LFS book version you want (type blank to get a list)"
+   elif [ $tochange = "BOOK" ]; then
+     display="svn (or) local (if local the book must be in $LFS_BOOK_LOC_DIR)"
+   elif [ $tochange = "SOURCES" ]; then
+     display="download (or) local (if local, must be in ${LFS}${sourcedir})"
+   elif [ $tochange = "TESTS" ]; then
+     display="Chapter 6 tests? Type yes (or) no"
+   fi
+   val=$(awk -F\= -v x=$tochange '$1==x {print $2}' $cfg)
+   $DIALOG --clear --title "Change value" \
+          --inputbox "$display" 0 0 $val 2> $tempfile2
+
+   $DIALOG --title "Confirmation"  --yesno "Commit ?" 0 0
+   case $? in
+       0) newval=$(cat $tempfile2)
+          awk -v x=$tochange -v n=$newval '
+               BEGIN {FS=OFS="="}$1==x {$2=n} {print}
+               ' $cfg > $cfg.tmp
+          mv $cfg.tmp $cfg
+       ;;
+       1|255) $DIALOG --infobox "Value not changed" 0 0
+              sleep 1
+   ;;
+   esac
+   $DIALOG --textbox $cfg 0 0
+}
+
+_main () {
+   $DIALOG --title "LFS config file editor" \
+           --menu "Please choose an option:" 15 55 5 \
+                   1 "View the config file" \
+                   2 "Edit config file" \
+                   3 "Exit from this menu" 2> $tempfile3
+
+   retv=$?
+   choice=$(cat $tempfile3)
+   [ $retv -eq 1 -o $retv -eq 255 ] && return $RETURN_PARAM
+
+   case $choice in
+       1) $DIALOG --textbox $cfg 0 0
+          _main
+           ;;
+       2) _edit
+          _main 
+           ;;
+       3) return 
+           ;;
+   esac
+}
+_main
+} #end configEdit
+#
+ChkLocalBook () {
+ChkLocalBookExists
+    return_val=$?
+    if [ "$return_val" -eq $RETURN_PARAM ]; then # requested book not present
+      echo "Requested book not present locally. Will svn it"
+    else # book present, test if need to svn an update
+      ChkLocalBookDetails
+      return_val=$?
+      if [ "$return_val" -eq $RETURN_PARAM ]; then
+        exit 1
+      fi
+    fi
+} # end ChkLocalBook
+#
+ChkLocalBookExists () {
+unset BookPath
+for BookPath in $( find $LFS_BOOK_LOC_DIR -name index.xml -exec dirname {} ';' )
+do
+  if [ -e $BookPath/.svn ]; then #a book exists, check the version
+    if [ $BOOK_VERSION = "Current_Development" -o $BOOK_VERSION = "BOOK" ]; then
+      version="BOOK"
+    else
+      version=$BOOK_VERSION
+    fi
+    if [ $version != "BOOK" ]; then BookPath="$BookPath/";fi # add a / 
+    if [ $BookPath == ${LFS_BOOK_LOC_DIR}/${version} ]; then
+      return 0 #requested version is present locally
+    fi
+  fi
+done
+return $RETURN_PARAM #requested book not present locally
+} #end ChkLocalBookExists
+#
+ChkLocalBookDetails () {
+if [ $BOOK_VERSION = "Current_Development" -o $BOOK_VERSION = "BOOK" ]; then
+  # check the last svn date
+  returned_array=( `LastAccessSvn "$argument"` )
+  retval=$?
+  if [ $retval -eq 0 ]; then # compare last svn date with today's date
+    if [ ${returned_array[0]} -eq ${returned_array[1]} ]; then
+      echo "same book already downloaded today"
+      echo "you will have to delete it to svn again"
+      return $RETURN_PARAM
+    else
+      return 0
+    fi
+  else
+    echo "Could not retrieve date of last svn - no entries file found."
+    echo "Will svn it"
+    return 0
+  fi
+else # book is a release version so don't update it
+  echo "Requested book is present locally and is a release version"
+  echo "so update not necessary"
+  return $RETURN_PARAM
+fi
+} # end ChkLocalBookDetails
+#
+CleanLocalREPO () { # del any files in the local directory
+if [ -d $LFS_BOOK_LOC_DIR ]; then #local dir exists
+  if [ "$(ls -A $LFS_BOOK_LOC_DIR)" ]; then
+    rm -rf $LFS_BOOK_LOC_DIR/$version # delete contents of local book dir
+  fi
+else  # create it
+  mkdir -pv $LFS_BOOK_LOC_DIR
+fi
+} # end CleanLocalREPO
+#
+GetSvnUrl () {
+if [ $SVN_URL = "blank" ]; then
+  SVN_URL="svn://svn.linuxfromscratch.org/LFS/"
+fi
+} # end GetSvnUrl
+#
+WhichLFSBook () {
+Ignore="bootscripts"
+PS3="Please select the book version : "
+select TAG in 'Current Development' $( svn ls ${SVN_URL}tags | grep -vE "$Ignore" )
+do
+  case $TAG in
+    '') echo >&2 "Please select a numbered option";;
+    Current*)
+      type=trunk
+      version=BOOK
+      BOOK_VERSION="Current_Development"
+    ;;
+    ?*)
+      type=tags
+      version=$TAG
+      BOOK_VERSION=$TAG
+    ;;
+  esac
+  BOOK_SVN_URL="${SVN_URL}$type/$version"
+  echo >&2 "You have selected '$TAG'"
+  echo >&2 "$BOOK_SVN_URL"
+  PS3="Is this correct? : "
+  select confirm in Yes No
+  do
+    case $confirm in
+      '') echo >&2 "Please enter 1 for Yes or 2 for No";;
+      ?*) break
+    esac
+  done
+  case $confirm in
+    No) PS3="Please select the book version : ";;
+# update the config file with the book version
+   Yes) awk -v x=BOOK_VERSION -v n=$BOOK_VERSION '
+             BEGIN {FS=OFS="="}$1==x {$2=n} {print}
+             ' $cfg > $cfg.tmp
+             mv $cfg.tmp $cfg
+      break
+  esac
+done
+} #end WhichLFSBook
+#
+SetLFSBook () {
+if [ "$BOOK_VERSION" = Current_Development -o "$BOOK_VERSION" = BOOK ]; then
+  type=trunk
+  version=BOOK
+else
+  type=tags
+  version=$BOOK_VERSION
+fi
+} #end SetLFSBook
+#
+LastAccessSvn () {
+local passed_array   # Local variable
+BookLoc=${LFS_BOOK_LOC_DIR}/${version}
+if [ -e ${BookLoc}/.svn/entries ]; then #check time of last svn
+  EntriesDate=$( stat --printf=%y ${BookLoc}/.svn/entries | awk 'gsub(/-/,"") {printf $1}' )
+  date=$(date +'%Y-%m-%d %H:%M:%S') # today's date
+  read Y M D h m s <<< ${date//[-: ]/ }
+  today=$Y$M$D
+  passed_array=( $EntriesDate $today ) # return the last svn date and today
+  echo "${passed_array[@]}"
+  return 0
+else
+  return $RETURN_PARAM # no entries file found
+fi
+} # end LastAccessSvn
+#
+CheckoutSVN () {
+Dir=$LFS_BOOK_LOC_DIR
+Url="${SVN_URL}$type/$version"
+Tag=$version
+#
+svn co $Url ${Dir}/$Tag # get the requested book
+#
+} # end CheckoutSVN
+#
+LocalBook () {
+if [ "$BOOK_VERSION" = Current_Development -o "$BOOK_VERSION" = BOOK ]; then
+    type="trunk"
+    version="BOOK"
+else
+    type="tags"
+    version=$BOOK_VERSION
+fi
+} # end LocalBook
+#
+DumpCommands () {
+REPODIR=${LFS_BOOK_LOC_DIR}/$version
+SOURCEDIR=${LFS}${sourcedir}
+target=$( echo $1 | awk '{print tolower($1)}')
+SVNINFO="`svn info $REPODIR | awk '{printf $0"|"}'`"
+# Note, tagged | on the end so it can be used as a record separator later
+# e.g.
+# echo $SVNINFO | awk 'BEGIN{ RS = "|" }; {print $0}'
+# will 'reconstitute it
+SVNrevision=$( echo $SVNINFO | awk 'BEGIN{ RS = "|" };/Revision/ {print $0}' )
+for dir in $DumpedCommands
+do
+  if [ ! -d $dir ]; then
+    install -vd $dir
+    touch $dir/.revision
+  fi
+done
+for dir in $DumpedCommands
+do
+  if [ -e "$dir" -a "$SVNrevision" != "$( cat $dir/.revision | awk '/Revision/ {print $0}')" ]; then
+    rm -r $dir
+    install -vd $dir
+    pushd $REPODIR
+            if [ -f ${SOURCEDIR}/lfs-Makefile.patch ]; then
+              patch -Np1 -i ${SOURCEDIR}/lfs-Makefile.patch # temporary fix for maketar
+            else
+              echo "no patch found so Makefile unchanged"
+            fi
+            make -j1 DUMPDIR=$DumpedCommands BASEDIR=$Dumpedhtml $target dump-commands
+            for dir in $DumpedCommands $Dumpedhtml
+            do
+              echo $SVNINFO | awk 'BEGIN{ RS = "|" }; {print $0}' > $dir/.revision
+            done
+    popd
+    break
+  fi
+done
+} # end of DumpCommands
+#
+CleanSourceDir () {
+SOURCEDIR=${LFS}${sourcedir}
+echo
+WgetList=$SOURCEDIR/wget-list
+if [ -d $SOURCEDIR ]; then
+  if [ "$(ls -A $SOURCEDIR)" ]; then
+    for File in $( ls $SOURCEDIR )
+    do
+      case $File in
+          pkguser.tar.xz|wget-list|md5sums|lfs-Makefile.patch) 
+            continue #leave these in the source dir
+          ;;
+         ?*)
+            if [ -f $WgetList ]; then
+              if [ "$( grep -q $File $WgetList ; echo $? )" = "1" ]; then
+                rm ${SOURCEDIR}/$File # delete the file if in wget-list
+              fi
+            else # no wget-list file so clean everything out
+              rm ${SOURCEDIR}/$File # remove all the files - brutal
+            fi
+          ;;
+      esac
+    done
+  fi
+else
+  mkdir -pv $SOURCEDIR
+  chmod -v a+wt $SOURCEDIR
+  chown -v lfs $SOURCEDIR
+fi
+} #end CleanSourceDir
+#
+GetSource () {
+#
+REPODIR=${LFS_BOOK_LOC_DIR}/$version
+SOURCEDIR=${LFS}${sourcedir}
+make -j1 -f $REPODIR/Makefile -C $REPODIR BASEDIR=$SOURCEDIR wget-list md5sums
+WgetList=$SOURCEDIR/wget-list
+md5sums=$SOURCEDIR/md5sums
+
+pushd $SOURCEDIR
+    RequiredFiles=$( md5sum --quiet -c $md5sums 2> /dev/null | awk -F\: '!/OK/{printf "%s ",$1}' )
+popd
+
+for File in $RequiredFiles
+do
+   Url=$( grep $File $WgetList )
+   case $File in
+       lfs-bootscripts*|udev-config*)
+          # idkw but md5sums never seem to match these
+       if [ ! -e $SOURCEDIR/$File ]; then
+         wget $WgetOpts -c $Url -O $SOURCEDIR/$File
+       fi
+       ;;
+       ?*)
+         wget $WgetOpts -c $Url -O $SOURCEDIR/$File
+        ;;
+    esac
+done
+#set all the sources to owner lfs
+chown -h lfs $SOURCEDIR/* # because chapter05.sh is run as lfs
+#
+} #end GetSource
+#
+ChkEmptySrcFiles () {
+SOURCEDIR=${LFS}${sourcedir}
+zeroLenFiles=$(ls -l $SOURCEDIR|awk '!/^d/&&$5==0 {print $NF}')
+len=${#zeroLenFiles}
+if [ $len -eq 0 ]; then
+  return 0
+else
+  echo -e "These files are empty:\n$zeroLenFiles"
+  return $RETURN_PARAM
+fi
+} # end ChkEmptySrcFiles
+#
+combineScripts () {
+declare -a commands=("${!1}")
+declare -a buildWrap=("${!2}")
+local combine=""
+numc=${#commands[@]}
+numb=${#buildWrap[@]}
+countc=0 # counter for the combine array
+countbl=0 # counter for build lines written
+inc=1 #false
+#
+for (( i=0; i<$numb; i++ ))
+do
+  case "${buildWrap[$i]}" in
+    configure_commands*)
+      combine[$countc]=${buildWrap[$countbl]}
+      ((countc++))
+      ((countbl++))
+      combine[$countc]=${buildWrap[$countbl]} # the {: line
+      ((countbl++))
+      ((countc++))
+      until [[ ${commands[$countg]} == make* ]]; do
+        combine[$countc]="  ${commands[$countg]}" # configure commands
+        ((countc++))
+        ((countg++))
+        inc=0 # found at least one configure command
+      done
+      if [ $inc -eq 1 ]; then
+        combine[$countc]='  echo "no configure script for this package"'
+        ((countc++))
+      fi
+      ;;
+    make_commands*)
+      inc=1
+      cont=0
+      combine[$countc]=${buildWrap[$countbl]}
+      ((countc++))
+      ((countbl++))
+      combine[$countc]=${buildWrap[$countbl]} # the {: command
+      ((countc++))
+      ((countbl++))
+      until [[ "${commands[$countg]}" == *install* ]]; do
+       case "${commands[$countg]}" in
+         *\\)
+            storit[$cont]="${commands[$countg]}"
+             ((cont++))
+             ((countg++))
+           ;;
+           *)
+             if [ $cont -gt 0 ]; then # continuation line found
+               for (( l=0; l<$cont; l++ )); do
+                 combine[$countc]="  ${storit[$l]}"
+                 ((countc++))
+               done
+               combine[$countc]="  ${commands[$countg]}"
+               ((countc++))
+               ((countg++))
+               cont=0
+             else
+               combine[$countc]="  ${commands[$countg]}" # make commands
+               ((countc++))
+               ((countg++))
+               inc=0 #at least one make command found
+             fi
+             if [ $countg -eq $numc ]; then # no more commands left
+               if [[ "${commands[$countg-1]}" != *make* ]]; then
+                 ((countc--))
+                 ((countg--))
+               fi
+               break
+             fi
+             ;;
+        esac
+       done
+       if [ $inc -eq 1 ]; then
+         combine[$countc]='  echo "no make script for this package"'
+         ((countc++))
+       fi
+      ;;
+    install_commands*)
+      inc=1
+      combine[$countc]=${buildWrap[$countbl]}
+      ((countc++))
+      ((countbl++))
+      combine[$countc]=${buildWrap[$countbl]} # the {: command
+      ((countc++))
+      ((countbl++))
+      if [[ "${commands[$countg]}" == *install* ]]; then
+        if [ $cont -gt 0 ]; then # there is a continuation line
+          for (( il=0; il<$cont; il++ )); do
+            combine[$countc]="  ${storit[$il]}"
+            ((countc++))
+          done
+          cont=0
+        fi
+        combine[$countc]="  ${commands[$countg]}"
+        ((countc++))
+        ((countg++))
+        inc=0
+        if [ $countg -eq $numc ]; then # no more commands left
+          continue
+        else
+          if [[ "${commands[$countg]}" == *install* ]]; then
+            combine[$countc]="  ${commands[$countg]}"
+            ((countc++))
+            ((countg++))
+            if [ $countg -eq $numc ]; then # no more commands left
+              continue
+            fi
+          fi
+        fi   
+      else
+        combine[$countc]='  echo "no install script for this package"'
+        ((countc++))
+      fi
+      ;;
+      *)
+        if [ $i -lt $countbl ]; then
+          continue
+        else
+          combine[$countc]=${buildWrap[$i]}
+          ((countc++))
+          ((countbl++))
+        fi
+      ;;
+  esac
+done
+rtr=(${combine[@]})
+} # end combineScript
+#
+getBuild () {
+local abuild=""
+buildfile=${LFS}${sourcedir}/pkguser/build
+if [ ! -e $buildfile ]; then
+  return $RETURN_PARAM
+else
+IFS='
+'
+abuild=( $( < $buildfile ) )
+rtrnBuild=(${abuild[@]})
+return 0
+fi
+} # end getBuild
+#
+getComms () {
+local acom=""
+curfile=${DumpedCommands}/${Chapter}/*-${CmdName}
+IFS='
+'
+acom=( $( < $curfile ) )
+rtrnCom=(${acom[@]})
+} # end getComms
+#
+GetCommands () {
+#get access to the arrays
+rtrnBuild=""
+getBuild
+return_val=$?
+if [ "$return_val" -eq $RETURN_PARAM ]; then # no build file present
+  return $RETURN_PARAM
+else
+buildScripts=(${rtrnBuild[@]})
+rtrnCom=""
+getComms
+commandScripts=(${rtrnCom[@]})
+numclines=${#commandScripts[@]} # # of commands
+#
+# place comands in output until first configure found
+countg=0
+contline=0
+for line in "${commandScripts[@]}"
+do
+  case "$line" in
+       *configure*|*Configure*) #Perl has Configure!
+# test if this is actually a sed with configure in it
+       if [[ "$line" == sed* ]]; then
+         echo "$line"
+         ((countg++))
+       else
+         if [ $contline -gt 0 ]; then
+           countg=$countg-$contline
+         fi
+         break
+       fi
+       ;;
+       make*) #begins with make
+       break
+       ;;
+       *)
+# test if a continuation line and store in cache
+         case "$line" in
+            *\\)
+             cacheit[$contline]="$line"
+             ((contline++))
+             ((countg++))
+            ;;
+            *)
+             if [ $contline -gt 0 ]; then # continuation line found
+               for (( l=0; l<$contline; l++ )); do
+                 echo "${cacheit[$l]}"
+               done
+               echo "$line"
+               contline=0
+               ((countg++)) # count # of commands written to output
+               if [ $countg -eq $numclines ]; then
+                 return 0
+               fi
+             else
+               echo "$line"
+               ((countg++)) # count # of commands written to output
+               if [ $countg -eq $numclines ]; then 
+                 return 0 
+               fi
+             fi
+            ;;
+          esac
+       ;;
+  esac
+done
+#
+rtr=""
+combineScripts commandScripts[@] buildScripts[@]
+scriptOut=(${rtr[@]})
+for t in "${scriptOut[@]}"
+do
+  echo $t
+done
+if [ $countg -ne $((numclines)) ]; then # output remaining commands
+  for (( k=$countg; k<$((numclines)); k++ ))
+  do
+    echo ${commandScripts[$k]}
+  done
+fi
+return 0
+fi
+} # end GetCommands
+#
+Header () {
+echo writing the script to: $Output
+case "$Chapter" in
+     chapter05)
+       cat > $Output << "EOF"
+#!/bin/bash -e
+#
+if [ $UID -eq 0 ]; then 
+  echo "Please do NOT run this script as root."
+  echo "Run it as user lfs."
+  exit 1
+fi
+if [ $(whoami) != "lfs" ]; then echo Please run this script as user lfs. ; exit 1; fi
+#
+EOF
+echo "builddir05=$builddir05" >> $Output
+       ;;
+     chapter06|chapter08)
+       cat > $Output << "EOF"
+#!/tools/bin/bash -e
+#
+if [ $UID -ne 0 ]; then echo Please run this script as root. ; exit 1; fi
+#
+EOF
+echo "PkgUserDir=$PkgUserDir" >> $Output
+       ;;
+esac
+echo "me=\$0
+LFS=$LFS
+SVNINFO=\"$SVNINFO\"
+sourcedir=$sourcedir
+BuildLog=$BuildLog" >> $Output
+case "$Chapter" in
+     chapter05)
+       CreateBuildDir >> $Output
+       unpack05 >> $Output
+     ;;
+esac
+} # end Header
+#
+unpackpkguser () {
+cd ${LFS}${sourcedir}
+tar Jxf pkguser.tar.xz
+cd $LFS
+} #end unpackpkguser
+#
+pkguser () {
+cat >> $Output << "EOF"
+pkguser_ () {
+cd /tools
+tar vxf ${sourcedir}/pkguser.tar.xz
+cd pkguser
+if [ "$?" != "0" ]; then
+  echo "failed to extract pkguser tar file correctly"
+  exit 1
+fi
+cp ./sbin/* /tools/bin
+cp ./usr/sbin/* /tools/bin
+if [ ! -d /etc/pkgusr/skel-package ]; then
+  mkdir -p /etc/pkgusr/skel-package
+fi
+cp -r /tools/pkguser/etc/* /etc/pkgusr/
+if [ ! -d /usr/lib/pkgusr ]; then
+  mkdir -p /usr/lib/pkgusr
+fi
+cp /tools/pkguser/lib/* /usr/lib/pkgusr/
+cp -v /tools/pkguser/bin/* /usr/bin/
+cp -v /tools/pkguser/usr/sbin/* /usr/sbin/
+if [ "`grep -q ^install\: /etc/group;echo $?`" != "0" ]; then
+  groupadd -g 9999 install
+fi
+# make sure pkgusers can write to the logfile
+chgrp install $BuildLog
+chmod 664 $BuildLog
+# set some initial dirs to install and sticky
+chown 0:9999 $(cat /tools/pkguser/installdirs.lst)
+chmod ug=rwx,o=rxt $(cat /tools/pkguser/installdirs.lst)
+#
+## Nasty workaround
+chgrp install /tools/libexec/pt_chown
+chmod 4750 /tools/libexec/pt_chown
+## Why the work around?
+# Normally Chapter 06 is carried out as root.
+# As pkgusers have no root powers they get stuck creating ptys for expect which is used in testsuites
+# setting pt_chown suid solves this issue.
+# Restricting execution to root and the install group effectivly means you need root
+# ( as the only way to get to a pkguser is via su from root )
+
+cat >> /etc/pkgusr/bash_profile << "BashProfile"
+#
+complete -o default -o nospace -A user su finger pinky
+export PkgName=$LOGNAME
+if [ -e /usr/src/core/${LOGNAME}/build -a ! -e ~/.${LOGNAME} ]; then
+  cd
+  bash -e /usr/src/core/${LOGNAME}/build
+  exit
+fi
+
+BashProfile
+install -v -d /usr/src/core/${LOGNAME}
+}
+EOF
+} # end of pkguser
+#
+delSrcFile () {
+echo "
+count=0
+cd ..
+for f in *.tar.*
+do
+cdfile[\$count]=\"\${f%.tar*}\"
+((count++))
+done
+#
+for (( i=0; i<\$count; i++ )); do
+ rm -rf \${cdfile[\$i]}
+done"
+} # end of delSrcFile
+#
+Function () {
+case $PkgName in
+    changingowner|kernfs|chroot)
+#
+    case $PkgName in
+        changingowner)
+        Chapter=`echo $Chapter | sed s/06/05/`
+    ;;
+    esac
+    WriteScript
+    return
+    ;;
+esac
+echo "${FuncName}_ () {
+FuncName=$FuncName" >> $Output
+case "$Chapter" in
+    chapter05)
+        TestBuiltCh5
+        case $FuncName in
+           stripping)
+              echo "starttime=\$( date +%s )" >> $Output
+           ;;
+           *)
+echo "PkgName=$PkgName
+SrcName=$SrcName
+starttime=\$( date +%s )" >> $Output
+cat >> $Output << "EOF"
+CreateBuildDir $FuncName
+EOF
+           case $FuncName in
+             gccpass1|gccpass2)
+                 cat >> $Output << "EOF"
+# chapter 5 gcc requires unpacking mpfr, mpc and gmp
+for i in mpfr gmp mpc
+do
+  ln -sfv ${LFS}${sourcedir}/${i}*.*z* .
+done
+EOF
+            ;;
+           esac
+echo "unpack05" >> $Output
+           ;;
+        esac
+    ;;
+    chapter06|chapter08)
+      case $PkgName in
+        chroot|kernfs|strippingagain|adjusting|creatingdirs|createfiles)
+          cat >> $Output << "EOF"
+if [ "`grep -q \"$FuncName\" $BuildLog;echo $?`" == "0" ]; then
+  echo "skipping $FuncName" #package already built so skip
+  return
+fi
+EOF
+        ;;
+        *)
+echo "PkgName=$PkgName" >> $Output
+          cat >> $Output << "EOF"
+if [ -e "$PkgUserDir/$PkgName/.$PkgName" ]; then
+  echo "skipping $PkgName"
+  return
+fi
+EOF
+echo "SrcName=$SrcName" >> $Output
+cat >> $Output << "EOF"
+install -v -d ${PkgUserDir}/${PkgName}
+touch ${PkgUserDir}/${PkgName}/build
+echo "BuildLog=$BuildLog" > ${PkgUserDir}/${PkgName}/build
+cat >> ${PkgUserDir}/${PkgName}/build << "IPS"
+set +h
+PkgName=$LOGNAME
+EOF
+echo "SrcName=$SrcName
+sourcedir=$sourcedir" >> $Output
+        ;;
+      esac
+    case $PkgName in
+      chroot|revisedchroot|kernfs|strippingagain|adjusting|creatingdirs|createfiles)
+       ;;
+       *)
+        unpack >> $Output
+        cat >> $Output << "EOF"
+unpack
+EOF
+       ;;
+     esac
+    ;;
+esac
+WriteScript
+closefunction
+} # end of Function
+closefunction () {
+case "$Chapter" in
+    chapter05)
+      case $FuncName in
+        stripping)
+        cat >> $Output << "EOF"
+endtime=$( date +%s )
+set +e
+elapsedtime=$( expr $endtime - $starttime )
+set -e
+echo "${FuncName} $unpacktime $elapsedtime" >> $BuildLog
+EOF
+       ;;
+       *)
+       cat >> $Output << "EOF"
+endtime=$( date +%s )
+set +e
+elapsedtime=$( expr $endtime - $starttime )
+set -e
+echo "${PkgName} $unpacktime $elapsedtime" >> $BuildLog
+EOF
+       ;;
+      esac
+         case $PkgName in
+           stripping)
+            cat >> $Output << "EOF"
+echo "removing contents of the build directory"
+rm -rf ${LFS}${builddir05}/*
+echo "Delete the build dir as root"
+echo 
+echo "You should now store the /tools dir somewhere on your host"
+echo "in case there is a build problem in chapter06"
+}
+EOF
+           ;;
+           *)
+           cat >> $Output << "EOF"
+}
+EOF
+           ;;
+       esac
+    ;; #close function for the chapter05.sh script
+    chapter06)
+        case $PkgName in
+            chroot|kernfs|adjusting|strippingagain|creatingdirs|createfiles)
+             cat >> $Output << "EOF"
+echo "${FuncName}" >> $BuildLog
+}
+EOF
+            ;;
+            shadow) #special case  - need to run pwconv and grpconv as root
+             cat >> $Output << "EOF"
+touch ~/.${PkgName}
+endtime=$( date +%s )
+set +e
+EOF
+           delSrcFile >> $Output
+           cat >> $Output << "EOF"
+elapsedtime=$( expr $endtime - $starttime )
+set -e
+echo "${PkgName} $unpacktime $elapsedtime" >> $BuildLog
+IPS
+EOF
+           resolvelinks
+           cat >> $Output << "EOF"
+if [ "`grep -q ^$PkgName\: /etc/passwd;echo $?`" != "0" ]; then
+  installpkg $PkgName
+fi
+resolvelinks
+su $PkgName
+if [ ! -e $PkgUserDir/$PkgName/.$PkgName ]; then
+  echo "${PkgName} failed"
+  exit 1
+fi
+set +e # ldconfig might not exist yet
+ldconfig
+set -e
+pwconv
+grpconv
+chown root /bin/su # cannot setgid without root privilege
+}
+EOF
+            ;; #end shadow special case
+            *)
+             cat >> $Output << "EOF"
+touch ~/.${PkgName}
+endtime=$( date +%s )
+set +e
+EOF
+           if [[ "${PkgName}" = e2fsprogs || "${PkgName}" = udev ]]; then
+             delSrcFile | sed -e 's/cd ../cd ..\/../' >> $Output
+           elif [[ "${PkgName}" = "linux-headers" ]]; then
+             echo -e "cd ..\nrm -rf linux-*" >> $Output
+           elif [[ "${PkgName}" = "glibc" ]]; then #also delete glibc-build
+             delSrcFile | sed '/cd ../a rm -rf glibc-build' >> $Output
+           elif [[ "${PkgName}" = "binutils" ]]; then #also delete binutils-build
+             delSrcFile | sed '/cd ../a rm -rf binutils-build' >> $Output
+           elif [[ "${PkgName}" = "gcc" ]]; then #also delete gcc-build
+             delSrcFile | sed '/cd ../a rm -rf gcc-build' >> $Output
+           elif [[ "${PkgName}" = "xz-utils" ]]; then
+             echo -e "cd ..\nrm -rf xz-utils*\ncp \${sourcedir}/xz-* ." >> $Output
+           elif [[ "${PkgName}" = "texinfo" ]]; then
+             echo -e "cd ..\nrm -rf texinfo-4.13" >>$Output # no 'a' on the end
+           elif [[ "${PkgName}" = "vim" ]]; then
+             echo -e "cd ..\nrm -rf vim73" >>$Output
+           else 
+             delSrcFile >> $Output
+           fi
+           cat >> $Output << "EOF"
+elapsedtime=$( expr $endtime - $starttime )
+set -e
+echo "${PkgName} $unpacktime $elapsedtime" >> $BuildLog
+IPS
+EOF
+           resolvelinks
+           cat >> $Output << "EOF"
+if [ "`grep -q ^$PkgName\: /etc/passwd;echo $?`" != "0" ]; then
+  installpkg $PkgName
+fi
+resolvelinks
+su $PkgName
+if [ ! -e $PkgUserDir/$PkgName/.$PkgName ]; then
+  echo "${PkgName} failed"
+  exit 1
+fi
+set +e # ldconfig might not exist yet
+ldconfig
+set -e
+EOF
+#set required dirs to be install dirs
+            if [ $PkgName = "linux-headers" ]; then #/usr/include/scsi
+              cat >> $Output << "EOF"
+chgrp install /usr/include/scsi
+chmod g+w,o+t /usr/include/scsi
+EOF
+            elif [ $PkgName = "glibc" ]; then #/usr/share/info/dir
+              cat >> $Output << "EOF"
+chown root:install /usr/share/info/dir
+chmod 664 /usr/share/info/dir
+EOF
+            elif [ $PkgName = "ncurses" ]; then #/usr/lib/pkgconfig
+              cat >> $Output << "EOF"
+chgrp install /usr/lib/pkgconfig
+chmod g+w,o+t /usr/lib/pkgconfig
+EOF
+            elif [ $PkgName = "bash" ]; then #/usr/share/aclocal
+              cat >> $Output << "EOF"
+chgrp install /usr/share/aclocal
+chmod g+w,o+t /usr/share/aclocal
+EOF
+            elif [ $PkgName = "man-db" ]; then #/es,it,ru
+              cat >> $Output << "EOF"
+chgrp install /usr/share/man/es
+chgrp install /usr/share/man/es/man*
+chgrp install /usr/share/man/it
+chgrp install /usr/share/man/it/man*
+chgrp install /usr/share/man/ru
+chgrp install /usr/share/man/ru/man*
+chmod g+w,o+t /usr/share/man/es
+chmod g+w,o+t /usr/share/man/es/man*
+chmod g+w,o+t /usr/share/man/it
+chmod g+w,o+t /usr/share/man/it/man*
+chmod g+w,o+t /usr/share/man/ru
+chmod g+w,o+t /usr/share/man/ru/man*
+EOF
+            fi
+            cat >> $Output << "EOF"
+}
+EOF
+          ;; #name loop
+        esac
+    ;; # close chapter06 loop
+   chapter08)
+             cat >> $Output << "EOF"
+touch ~/.${PkgName}
+endtime=$( date +%s )
+set +e
+elapsedtime=$( expr $endtime - $starttime )
+set -e
+echo "${PkgName} $unpacktime $elapsedtime" >> $BuildLog
+IPS
+EOF
+           resolvelinks
+           cat >> $Output << "EOF"
+if [ "`grep -q ^$PkgName\: /etc/passwd;echo $?`" != "0" ]; then
+  installpkg $PkgName
+fi
+resolvelinks
+su $PkgName
+if [ ! -e $PkgUserDir/$PkgName/.$PkgName ]; then
+  echo "${PkgName} failed"
+  exit 1
+fi
+set +e # ldconfig might not exist yet
+ldconfig
+set -e
+rm ${PkgUserDir}/{coreutils/.coreutils,udev/.udev,shadow/.shadow} # in prep for blfs
+}
+EOF
+    ;;
+esac
+} #end closefunction
+
+resolvelinks () {
+# At the beginning of chapter 6 there are symlinks that point to the tools dir
+# Trouble is these are owned by root so need to change owner to the package user
+case $PkgName in
+    gcc)
+        Extra=""
+        links="/usr/lib/libstdc++.la /usr/lib/libgcc_s.so{,.1} /usr/lib/libstdc++.so{,.6}"
+    ;;
+    bash)
+        Extra=""
+        links="/bin/bash"
+    ;;
+    coreutils)
+        Extra=""
+        links="/bin/{cat,echo,false,pwd,stty} /etc/group"
+    ;;
+    perl)
+        Extra=""
+        links="/usr/bin/perl"
+    ;;
+    shadow)
+        Extra=""
+        links="/usr/share/man/man{5/passwd.5,3/getspnam.3} /etc/{passwd,shadow,group,gshadow}{,-}"
+    ;;
+    sysklogd)
+        Extra=""
+        links="/usr/share/man/man8/sysklogd.8"
+    ;;
+    udev)
+        Extra="install -dv /lib/{firmware,udev/devices/pts} && mknod -m0666 /lib/udev/devices/null c 1 3"
+        links="/lib/{firmware,udev,udev/devices,udev/devices/pts}"
+    ;;
+    *)
+        Extra=""
+        links=""
+    ;;
+esac
+echo "resolvelinks () {
+$Extra
+for link in $links
+do
+  if [ -e "\$link" ]; then
+    chown -h \$PkgName:\$PkgName \$link # change owner to package user so can overwrite
+  fi
+done
+return
+}" >> $Output
+} #end resolvelinks
+#
+CreateBuildDir () {
+# only used in chapter 5
+cat << "EOF"
+CreateBuildDir () {
+BuildDir=${LFS}${builddir05}/${1}
+if [ ! -e $BuildDir ]; then
+  install -d $BuildDir
+  cd $BuildDir
+else
+  cd $BuildDir
+fi
+}
+EOF
+} #end CreateBuildDir
+unpack05 () { # need the LFS bit for chapter05 only
+cat << "EOF"
+unpack05 () {
+starttime=$( date +%s )
+cp ${LFS}${sourcedir}/${SrcName}*.* .
+cd `tar vxf ${SrcName}*z* | awk -F\/ 'END{print $1}'`
+
+endtime=$( date +%s )
+set +e
+unpacktime=$( expr $endtime - $starttime )
+set -e
+starttime=$( date +%s )
+}
+EOF
+} #end unpack05
+unpack () {
+case $PkgName in
+    udev)
+    cat << "EOF"
+unpack () {
+starttime=$( date +%s )
+cp ${sourcedir}/${SrcName}*.* .
+cd `tar vxf ${SrcName}???.tar*z* | awk -F\/ 'END{print $1}'`
+
+endtime=$( date +%s )
+set +e
+unpacktime=$( expr $endtime - $starttime )
+set -e
+starttime=$( date +%s )
+}
+EOF
+    ;;
+    *)
+    cat << "EOF"
+unpack () {
+starttime=$( date +%s )
+cp ${sourcedir}/${SrcName}*.* .
+cd `tar vxf ${SrcName}*z* | awk -F\/ 'END{print $1}'`
+
+endtime=$( date +%s )
+set +e
+unpacktime=$( expr $endtime - $starttime )
+set -e
+starttime=$( date +%s )
+}
+EOF
+   ;;
+esac
+} # end unpack
+#
+TestBuiltCh5 () {
+    cat >> $Output << "EOF"
+if [ "`grep -q \"$FuncName\" $BuildLog;echo $?`" == "0" ]; then
+  echo "skipping $FuncName"
+  return
+fi
+EOF
+} #end TestBuiltCh5
+
+WriteScript () {
+# Fixup some stuff
+
+case $PkgName in
+    glibc)
+        # set up glibc's timezone
+        # + fix the builddir issue
+        GetCommands \
+        | sed -e '/tzselect/d' \
+              -e 's[\*\*EDITME<xxx>EDITME\*\*['$TZ'[' \
+        | awk '{if ($1 == "mkdir")
+print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
+else
+print $0
+}' \
+        >> $Output
+    ;;
+    e2fsprogs)
+        GetCommands \
+        | sed -e 's/mkdir -v build/mkdir -v e2fsprogs-build/' \
+              -e 's/cd build/cd e2fsprogs-build/' \
+        >> $Output
+    ;;
+    bash)
+       GetCommands \
+        | sed -e '/nobody/d' \
+              -e '/--login/d' \
+        >> $Output
+
+    ;;
+    groff)
+        GetCommands \
+        | sed -e 's/\*\*EDITME<paper_size>EDITME\*\*/'$PAPER_SIZE'/' \
+        >> $Output
+    ;;
+    gmp)
+        # if building for 64bit need to remove config for 32
+        # TODO fix this
+        GetCommands \
+        | sed -e '/ABI=32/d' \
+        >> $Output
+    ;;
+    procps)
+       #
+       GetCommands \
+        | sed -e '/make install/ i sed -i /ldconfig/d Makefile' \
+        >> $Output
+    ;;
+    stripping)
+        # strip always exits with 1, so toggle bash's -e flag
+        echo "set +e" >> $Output
+        GetCommands \
+        >> $Output
+        echo "set -e" >> $Output
+    ;;
+    createfiles)
+        # can't start a new shell just yet - it'll stop the script
+        GetCommands \
+        | sed '/exec \/tools\/bin\/bash --login +h/d' \
+        >> $Output
+    ;;
+    gawk|flex)
+        # gawk-4.0.0's make check has a race condition, so force jobs to 1
+        # so does flex-2.5.35
+        #
+        GetCommands \
+        | sed -e 's/check/-j1 check/' \
+        >> $Output
+    ;;
+    shadow)
+        # assume no cracklib support
+        # don't install foreign man pages - one hellova sed!
+        # don't set root passwd
+        # setup shadow pssswd files
+        # delete pwconv and grpconv because cannot lock /etc/passwd
+        # do pwconv and grpconv later as root
+        GetCommands \
+        | sed -e "/sed -i 's@DICTPATH.*@DICTPATH\\\t\/lib\/cracklib\/pw_dict@' \\\\/d" \
+              -e '0,/etc\/login.defs/! s/etc\/login.defs//' \
+              -e "/configure_commands()/i sed -i -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr \\\\\\\//' \\\\\n -e 's\/zh_CN zh_TW\/\/' \\\\\n -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr\//'  man/Makefile.in" \
+              -e '/passwd root/d' \
+              -e '/pwconv/ i touch /etc/shadow\nchmod 640 /etc/shadow' \
+              -e '/grpconv/ i touch /etc/gshadow\nchmod 640 /etc/shadow' \
+              -e '/pwconv/d' \
+              -e '/grpconv/d' \
+        >> $Output
+    ;;
+    sysklogd)
+       # fix the Make file to use the install wrapper and not the default install bin
+       GetCommands \
+        | awk '{if ($NF == "install" && $1 == "make") $1 = "  make INSTALL=install"; print $0}' \
+        >> $Output
+    ;;
+    sysvinit)
+        # tries to instal a fifo to /dev/, which is kinda pointless
+        GetCommands \
+        | sed -e '/install_commands()/ i sed -i '\''s/mknod/echo mknod/'\'' src/Makefile' \
+        >> $Output
+    ;;
+    texinfo)
+        # tries, and fails, to rebuild /usr/share/info/dir
+        # replaced with a harmless for loop
+        GetCommands \
+        | sed -e '/cd \/usr\/share\/info/d' \
+              -e '/rm -v dir/d' \
+              -e 's/for f in \*/for f in \*; do/' \
+              -e 's/do install-info \$f dir 2>\/dev\/null/break/' \
+        >> $Output
+    ;;
+    udev)
+        # do these as root
+        GetCommands \
+        | sed -e '/install -dv\|mknod/d' \
+        >> $Output
+    ;;
+    vim)
+        GetCommands \
+        | sed -e 's/make test/make -j1 test/' \
+              -e '/:options/d' \
+        >> $Output
+    ;;
+    strippingagain)
+        # this strip is a little more awkward
+        #
+        GetCommands \
+        | sed -e '/logout/ i echo "merde, we'\''re nearly done\ncopy'\''n'\''paste the following\n"' \
+              -e 's/^/echo "/' \
+              -e 's/\$/\\$/g' \
+              -e 's/\\$/\\\\/' \
+              -e 's/$/"/' \
+        >> $Output
+        cat >> $Output << "EOF"
+echo "
+#
+# NOTE - serious debuggers don't want to strip so skip
+# this copy'n'paste
+#
+# from now on use the ~/LFS-chroot.sh script to enter
+# you'll want to delete some or all of the foreign man pages
+# in the /usr/share/man dir - which should be chown root and chmod 755
+# Install chapter 7 and then su kernel to install the kernel.
+# Don't forget to set a root password!
+# Finally - change #!/tools/bin/bash to #!/bin/bash in /usr/sbin/installpkg
+#"
+EOF
+    ;;
+    coreutils)
+        GetCommands \
+        | sed -e '/NON_ROOT_USERNAME/,/\/dummy/d' \
+        >> $Output
+    ;;
+    kernel)
+      echo "make mrproper" >> $Output
+    ;;
+    *)
+        GetCommands \
+        >> $Output
+        return_val=$?
+        if [ "$return_val" -eq $RETURN_PARAM ]; then # no build file
+          echo "No build file available in ${LFS}${sourcedir}/pkguser"
+          echo "Please place the build file there"
+          exit 1
+        fi
+    ;;
+esac
+} # end WriteScript
+
+cleanstart () {
+for Script in chapter{05,06,08,06-asroot,06-chroot}.sh LFS-chroot.sh
+do
+  for loc in $LFS ~/
+  do
+    if [ -e $loc/$Script ]; then rm $loc/$Script;fi
+  done
+done
+} #end cleanstart
+
+Start () {
+cleanstart
+REPODIR=${LFS_BOOK_LOC_DIR}/$version
+#
+for Chapter in chapter{05,06,08}
+do
+  Output=$LFS/${Chapter}.sh
+  Header
+  for Name in $( awk -F\" '/href/ && !/<!--/ {gsub(/\.xml/,"");print $(NF -1)}' ${REPODIR}/${Chapter}/${Chapter}.xml )
+  do
+    FuncName=$( echo $Name | sed -e s/-//g ) # no - allowed in bash names
+    PkgName=$( echo $Name | sed -e s/pass.$// -e s/-$// )
+    SrcName=$PkgName-
+    CmdName=$Name
+    Output=$LFS/${Chapter}.sh
+    case $PkgName in
+      introduction|toolchaintechnotes|generalinstructions|pkgmgt|aboutdebug)
+      continue
+      ;;
+      linux-headers|kernel)
+          SrcName=linux-
+          Function
+      ;;
+      xz)
+          CmdName=xz-utils
+          Function
+      ;;
+      expect)
+          SrcName=expect5
+          Function
+      ;;
+      tcl)
+          SrcName=tcl8
+          Function
+      ;;
+      changingowner|kernfs)
+          Chapter=`echo $Chapter | sed s/05/06/`
+          # changingowner is at the end of chapter 5 but needs root privilege so
+          # makes sense to shift it into chapter06's 'requires root' script
+          Output=$LFS/${Chapter}-asroot.sh
+          Function
+      ;;
+      chroot)
+          Output=$LFS/${Chapter}-chroot.sh
+          # if you log out or reboot you need to mount the kernelfs again
+          # so include some conditionals to look after this
+          cat $LFS/${Chapter}-asroot.sh \
+          | awk '/mount -v/ { printf "if [ \"`grep -q \""$NF"\" /proc/mounts;echo $?`\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
+          >> $Output
+          Function
+      ;;
+      revisedchroot)
+          Output=~/LFS-chroot.sh
+          # use this once LFS chapter06 is done, again conditionals added
+          cat $LFS/${Chapter}-asroot.sh \
+          | awk '/mount -v/ {printf "if [ \"`grep -q \""$NF"\" /proc/mounts;echo $?`\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
+          >> $Output
+          WriteScript
+      ;;
+      createfiles)
+          Function
+          # Now have a base file structure so add pkguser
+          pkguser
+      ;;
+      fstab) # can't deal with this here
+          continue
+      ;;
+      *)
+          if [[ "$Chapter" == chapter08 && "$PkgName" == grub ]]; then #want the grub in chapter06 but not the one in chapter08
+            continue
+          else
+            Function
+          fi
+      ;;
+    esac
+  done
+done
+#
+for Script in $LFS/chapter{05,06,08,06-asroot,06-chroot} ~/LFS-chroot
+do
+  Output=${Script}.sh
+  awk '/_\ \(\)\ \{/ {print $1}' $Output >> $Output
+  chmod 700 $Output
+done
+sed -e 's@BuildLog='$LFS'@BuildLog=@' -i $LFS/{chapter06.sh,chapter08.sh}
+# remove all make checks from chapter05
+sed -e '/make check/d' \
+    -e '/make -j1 check/d' \
+    -e '/make RUN_EXPENSIVE_TESTS=yes check/d' \
+    -e '/TZ=UTC make test/d' \
+    -e '/make test/d' \
+    -i $LFS/chapter05.sh
+#check if tests requested for chapter06
+if [ $TESTS = "no" ]; then
+  sed -e '/cp -v ..\/glibc-2.14.1\/iconvdata\/gconv-modules iconvdata/d' \
+      -e '/make -k check 2>&1 | tee glibc-check-log/d' \
+      -e '/grep Error glibc-check-log/d' \
+      -e '/make check/d' \
+      -e '/make -j1 check/d' \
+      -e '/make -j1 test/d' \
+      -e '/make -k check/d' \
+      -e '/make -kj1 check/d' \
+      -e '/make check 2>&1 | tee gmp-check-log/d' \
+      -e "/awk '\/tests passed\/{total+=\$2} ; END{print total}' gmp-check-log/d" \
+      -e '/ulimit -s 16384/d' \
+      -e '/..\/gcc-4.6.2\/contrib\/test_summary/d' \
+      -e '/make NON_ROOT_USERNAME=nobody check-root/d' \
+      -e '/echo "dummy:x:1000:nobody" >> \/etc\/group/d' \
+      -e '/chown -Rv nobody ./d' \
+      -e '/su-tools nobody -s \/bin\/bash -c \"make RUN_EXPENSIVE_TESTS=yes check\"/d' \
+      -e '/su-tools nobody -s \/bin\/bash -c "make tests"/d' \
+      -e "/sed -i '\/dummy\/d' \/etc\/group/d" \
+      -e '/make test/d' \
+      -i $LFS/chapter06.sh
+#remove making all the locales in glibc as the required ones have been installed
+  sed -e '/make localedata\/install-locales/d' \
+      -i $LFS/chapter06.sh
+fi
+#
+# set lfs as owner of chapter05.sh
+chown lfs $LFS/chapter05.sh
+# create the build dir for chapter05.sh and set owner to lfs
+if [ ! -d ${LFS}${builddir05} ]; then
+  mkdir -pv ${LFS}${builddir05}
+  chown lfs ${LFS}${builddir05}
+else
+  chown lfs ${LFS}${builddir05}
+fi
+} # end Start
+#
+# main program  - call the functions
+#
+configEdit # option to change the config file
+retval=$?
+if [ $retval -eq $RETURN_PARAM ]; then
+ echo "Cancel pressed. Exiting now"
+ exit 1
+fi
+source $cfg # maybe config edited - update the values
+if [ $BOOK = "svn" ]; then
+  GetSvnUrl # make sure the svn url is set
+  if [ $BOOK_VERSION != "blank" ]; then #check if the requested book is present locally
+    ChkLocalBook
+    SetLFSBook
+  else #version set to blank so ask for which book
+    WhichLFSBook # choose which LFS version to download the xml files
+    # check if the requested book is already present locally
+    ChkLocalBook
+  fi
+  CleanLocalREPO # delete any files in local book repository
+  CheckoutSVN  # svn the requested book xml files
+else  #svn set to local
+  ChkLocalBookExists
+  return_val=$?
+  if [ "$return_val" -eq $RETURN_PARAM ]; then #no local book found
+    echo "The requested book was not found at $LFS_BOOK_LOC_DIR."
+    echo "Change the location or svn it. Exiting now"
+    exit 1
+  else
+    LocalBook  # set values for locally stored book xml
+  fi
+fi
+DumpCommands LFS #parse the LFS xml
+if [ $SOURCES = "download" ]; then
+  CleanSourceDir # clean the sources file if not empty
+  GetSource # download all the sources
+  ChkEmptySrcFiles #check for failed downloads
+  return_val=$?
+  if [ "$return_val" -eq $RETURN_PARAM ]; then
+    echo "Empty source files found in ${LFS}${sourcedir}"
+    echo "Exiting now"
+    exit 1
+  fi
+else # sources are local
+  ChkEmptySrcFiles # check for any empty files
+  return_val=$?
+  if [ "$return_val" -eq $RETURN_PARAM ]; then
+    echo "Empty source files found in ${LFS}${sourcedir}"
+    echo "Exiting now"
+    exit 1
+  fi
+fi
+unpackpkguser
+Start # build the scripts
