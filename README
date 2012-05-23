@@ -33,7 +33,7 @@ chapter08.sh creates a placeholder to build the kernel.
 
 When the scripts have finished, follow chapter 8 from the book to
 install the kernel. Do su kernel to enter the kernel dir. mkproper has already
-been run. I've included a .config file here if you need one.
+been run.
 
 The package-user management system uses three main scripts:-
 
