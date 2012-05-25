@@ -450,55 +450,37 @@ inc=1 #false
 #
 for (( i=0; i<$numb; i++ ))
 do
-  case "${buildWrap[$i]}" in
+  case "${buildWrap[i]}" in
     configure_commands*)
-      combine[$countc]=${buildWrap[$countbl]}
-      ((countc++))
-      ((countbl++))
-      combine[$countc]=${buildWrap[$countbl]} # the {: line
-      ((countbl++))
-      ((countc++))
-      until [[ ${commands[$countg]} == make* ]]; do
-        combine[$countc]="  ${commands[$countg]}" # configure commands
-        ((countc++))
-        ((countg++))
+      combine[countc++]=${buildWrap[countbl++]}
+      combine[countc++]=${buildWrap[countbl++]} # the {: line
+      until [[ ${commands[countg]} == make* ]]; do
+        combine[countc++]="  ${commands[countg++]}" # configure commands
         inc=0 # found at least one configure command
       done
       if [ $inc -eq 1 ]; then
-        combine[$countc]='  echo "no configure script for this package"'
-        ((countc++))
+        combine[countc++]='  echo "no configure script for this package"'
       fi
       ;;
     make_commands*)
       inc=1
       cont=0
-      combine[$countc]=${buildWrap[$countbl]}
-      ((countc++))
-      ((countbl++))
-      combine[$countc]=${buildWrap[$countbl]} # the {: command
-      ((countc++))
-      ((countbl++))
-      until [[ "${commands[$countg]}" == *install* ]]; do
-       case "${commands[$countg]}" in
+      combine[countc++]=${buildWrap[countbl++]}
+      combine[countc++]=${buildWrap[countbl++]} # the {: command
+      until [[ "${commands[countg]}" == *install* ]]; do
+       case "${commands[countg]}" in
          *\\)
-            storit[$cont]="${commands[$countg]}"
-             ((cont++))
-             ((countg++))
+            storit[cont++]="${commands[countg++]}"
            ;;
            *)
              if [ $cont -gt 0 ]; then # continuation line found
                for (( l=0; l<$cont; l++ )); do
-                 combine[$countc]="  ${storit[$l]}"
-                 ((countc++))
+                 combine[countc++]="  ${storit[l]}"
                done
-               combine[$countc]="  ${commands[$countg]}"
-               ((countc++))
-               ((countg++))
+               combine[countc++]="  ${commands[countg++]}"
                cont=0
              else
-               combine[$countc]="  ${commands[$countg]}" # make commands
-               ((countc++))
-               ((countg++))
+               combine[countc++]="  ${commands[countg++]}" # make commands
                inc=0 #at least one make command found
              fi
              if [ $countg -eq $numc ]; then # no more commands left
@@ -512,53 +494,41 @@ do
         esac
        done
        if [ $inc -eq 1 ]; then
-         combine[$countc]='  echo "no make script for this package"'
-         ((countc++))
+         combine[countc++]='  echo "no make script for this package"'
        fi
       ;;
     install_commands*)
       inc=1
-      combine[$countc]=${buildWrap[$countbl]}
-      ((countc++))
-      ((countbl++))
-      combine[$countc]=${buildWrap[$countbl]} # the {: command
-      ((countc++))
-      ((countbl++))
-      if [[ "${commands[$countg]}" == *install* ]]; then
+      combine[countc++]=${buildWrap[countbl++]}
+      combine[countc++]=${buildWrap[countbl++]} # the {: command
+      if [[ "${commands[countg]}" == *install* ]]; then
         if [ $cont -gt 0 ]; then # there is a continuation line
           for (( il=0; il<$cont; il++ )); do
-            combine[$countc]="  ${storit[$il]}"
-            ((countc++))
+            combine[countc++]="  ${storit[il]}"
           done
           cont=0
         fi
-        combine[$countc]="  ${commands[$countg]}"
-        ((countc++))
-        ((countg++))
+        combine[countc++]="  ${commands[countg++]}"
         inc=0
         if [ $countg -eq $numc ]; then # no more commands left
           continue
         else
-          if [[ "${commands[$countg]}" == *install* ]]; then
-            combine[$countc]="  ${commands[$countg]}"
-            ((countc++))
-            ((countg++))
+          if [[ "${commands[countg]}" == *install* ]]; then
+            combine[countc++]="  ${commands[countg++]}"
             if [ $countg -eq $numc ]; then # no more commands left
               continue
             fi
           fi
         fi   
       else
-        combine[$countc]='  echo "no install script for this package"'
-        ((countc++))
+        combine[countc++]='  echo "no install script for this package"'
       fi
       ;;
       *)
         if [ $i -lt $countbl ]; then
           continue
         else
-          combine[$countc]=${buildWrap[$i]}
-          ((countc++))
+          combine[countc++]=${buildWrap[i]}
           ((countbl++))
         fi
       ;;
@@ -604,39 +574,34 @@ getComms
 commandScripts=(${rtrnCom[@]})
 numclines=${#commandScripts[@]} # # of commands
 #
-# place comands in output until first configure found
+# place commands in output until first configure found
 countg=0
 contline=0
 for line in "${commandScripts[@]}"
 do
   case "$line" in
-       *configure*|*Configure*) #Perl has Configure!
-# test if this is actually a sed with configure in it
-       if [[ "$line" == sed* ]]; then
+       sed*)
          echo "$line"
          ((countg++))
-       else
-         if [ $contline -gt 0 ]; then
-           countg=$countg-$contline
-         fi
+       ;;
+       *configure*|*Configure*) #Perl has Configure!
+         countg=$countg-$contline
          break
-       fi
        ;;
        make*) #begins with make
        break
        ;;
        *)
-# test if a continuation line and store in cache
+# if a continuation line, store in cache
          case "$line" in
             *\\)
-             cacheit[$contline]="$line"
-             ((contline++))
+             cacheit[contline++]="$line"
              ((countg++))
             ;;
             *)
              if [ $contline -gt 0 ]; then # continuation line found
                for (( l=0; l<$contline; l++ )); do
-                 echo "${cacheit[$l]}"
+                 echo "${cacheit[l]}"
                done
                echo "$line"
                contline=0
@@ -1277,9 +1242,14 @@ print $0
         | sed -e 's/check/-j1 check/' \
         >> $Output
     ;;
+    kbd)
+        GetCommands \
+        | sed -e 's/\(.*\)&&$/\1/' \
+        >> $Output
+    ;;
     shadow)
         # assume no cracklib support
-        # don't install foreign man pages - one hellova sed!
+        # don't install foreign man pages
         # don't set root passwd
         # setup shadow pssswd files
         # delete pwconv and grpconv because cannot lock /etc/passwd
@@ -1490,7 +1460,7 @@ if [ $TESTS = "no" ]; then
       -e '/make check 2>&1 | tee gmp-check-log/d' \
       -e "/awk '\/tests passed\/{total+=\$2} ; END{print total}' gmp-check-log/d" \
       -e '/ulimit -s 16384/d' \
-      -e '/..\/gcc-4.6.2\/contrib\/test_summary/d' \
+      -e '/..\/gcc-4.7.0\/contrib\/test_summary/d' \
       -e '/make NON_ROOT_USERNAME=nobody check-root/d' \
       -e '/echo "dummy:x:1000:nobody" >> \/etc\/group/d' \
       -e '/chown -Rv nobody ./d' \
