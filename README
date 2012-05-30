@@ -62,3 +62,5 @@ If you decide to run the tests, you may well find that the gcc tests fail. I got
 21 failures with libmudflap and this stopped the script running. You'll have to
 restart the script with the tests set to no. Do this in the config file edit at
 the start of the lfsa script.
+
+Release2.2 - replaced adjusting and readjusting in version 7.1.
