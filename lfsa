@@ -777,7 +777,7 @@ case "$Chapter" in
     chapter05)
         TestBuiltCh5
         case $FuncName in
-           stripping)
+           adjusting|stripping)
               echo "starttime=\$( date +%s )" >> $Output
            ;;
            *)
@@ -804,7 +804,7 @@ echo "unpack05" >> $Output
     ;;
     chapter06|chapter08)
       case $PkgName in
-        chroot|kernfs|strippingagain|adjusting|creatingdirs|createfiles)
+        chroot|kernfs|strippingagain|readjusting|adjusting|creatingdirs|createfiles)
           cat >> $Output << "EOF"
 if [ "`grep -q \"$FuncName\" $BuildLog;echo $?`" == "0" ]; then
   echo "skipping $FuncName" #package already built so skip
@@ -834,7 +834,7 @@ sourcedir=$sourcedir" >> $Output
         ;;
       esac
     case $PkgName in
-      chroot|revisedchroot|kernfs|strippingagain|adjusting|creatingdirs|createfiles)
+      chroot|revisedchroot|kernfs|strippingagain|readjusting|adjusting|creatingdirs|createfiles)
        ;;
        *)
         unpack >> $Output
@@ -892,7 +892,7 @@ EOF
     ;; #close function for the chapter05.sh script
     chapter06)
         case $PkgName in
-            chroot|kernfs|adjusting|strippingagain|creatingdirs|createfiles)
+            chroot|kernfs|readjusting|adjusting|strippingagain|creatingdirs|createfiles)
              cat >> $Output << "EOF"
 echo "${FuncName}" >> $BuildLog
 }
