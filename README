@@ -63,4 +63,5 @@ If you decide to run the tests, you may well find that the gcc tests fail. I got
 restart the script with the tests set to no. Do this in the config file edit at
 the start of the lfsa script.
 
+Release2.3 - can give a config filename: ./lfsa <configfile> Results in no menu displayed.
 Release2.2 - replaced adjusting and readjusting in version 7.1.
