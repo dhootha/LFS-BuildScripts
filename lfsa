@@ -26,6 +26,19 @@ if [ "$LFS/tools" != "$( ls -l /tools | awk '{print $NF}' )" ]; then
 fi
 # repository will be for LFS
 REPO="LFS"
+cfg=$1 # name of the config file, if present
+if [ ! -z $cfg ]; then # config filename given
+  if [ ! -e $cfg ]; then # doesn't exist - exit
+    echo "If you give the config filename it must exist"
+    echo "Exiting now"
+    exit 1
+  else
+    display_menu=false
+  fi
+else
+  display_menu=true
+  cfg=~/LFS.conf
+fi
 DumpedCommands=$LFS/lfs-commands
 Dumpedhtml=$LFS/lfs-html
 
@@ -34,21 +47,20 @@ RETURN_PARAM=251  # return parameter from a function on error
 # these are relative to newly installed lfs ( i.e. without $LFS prefix )
 sourcedir=/sources
 builddir05=/build # chapter 5 build dir
-PkgUserDir=/usr/src/core
+PkgUserDir=/usr/src/core # all installed packages sit under here
 
 BuildLog=$LFS/LFS-buildlog.log # keep a record of packages and times
 if [ ! -e $BuildLog ]; then
   touch $BuildLog
   chown lfs:lfs $BuildLog #make lfs the owner
 fi
-
-cfg=~/LFS.conf # config file to hold required params
+pkguserFile=pkguser.tar.xz # file holding the package-user build files
 #initialize the config variables
 TZ=$TZ
 PAPER_SIZE=$PAPER_SIZE
 LFS_BOOK_LOC_DIR=$HOME/LFS_SVN/$REPO # def local dir for the downloaded book xml
 SVN_URL="svn://svn.linuxfromscratch.org/$REPO/" #svn url
-BOOK_VERSION="blank"
+BOOK_VERSION=$BOOK_VERSION
 SOURCES=$SOURCES
 BOOK=$BOOK
 TESTS=$TESTS
@@ -66,6 +78,9 @@ else
   if [ -z $BOOK ]; then
     BOOK="svn"
   fi
+  if [ -z $BOOK_VERSION ]; then
+    BOOK_VERSION="blank"
+  fi
   if [ -z $SOURCES ]; then
     SOURCES="download"
   fi
@@ -77,7 +92,7 @@ else
   echo "PAPER_SIZE=$PAPER_SIZE" | tee -a $cfg
   echo "LFS_BOOK_LOC_DIR=$HOME/LFS_SVN/$REPO" | tee -a $cfg
   echo "SVN_URL=svn://svn.linuxfromscratch.org/$REPO/" | tee -a $cfg
-  echo "BOOK_VERSION=blank" | tee -a $cfg
+  echo "BOOK_VERSION=$BOOK_VERSION" | tee -a $cfg
   echo "SOURCES=$SOURCES" | tee -a $cfg
   echo "BOOK=$BOOK" | tee -a $cfg
   echo "TESTS=$TESTS" | tee -a $cfg
@@ -307,10 +322,10 @@ fi
 #
 CheckoutSVN () {
 Dir=$LFS_BOOK_LOC_DIR
-Url="${SVN_URL}$type/$version"
+Url="${SVN_URL}${type}/${version}"
 Tag=$version
 #
-svn co $Url ${Dir}/$Tag # get the requested book
+svn co $Url ${Dir}/${Tag} # get the requested book
 #
 } # end CheckoutSVN
 #
@@ -325,7 +340,7 @@ fi
 } # end LocalBook
 #
 DumpCommands () {
-REPODIR=${LFS_BOOK_LOC_DIR}/$version
+REPODIR=${LFS_BOOK_LOC_DIR}/${version}
 SOURCEDIR=${LFS}${sourcedir}
 target=$( echo $1 | awk '{print tolower($1)}')
 SVNINFO="`svn info $REPODIR | awk '{printf $0"|"}'`"
@@ -366,13 +381,13 @@ done
 CleanSourceDir () {
 SOURCEDIR=${LFS}${sourcedir}
 echo
-WgetList=$SOURCEDIR/wget-list
+WgetList=${SOURCEDIR}/wget-list
 if [ -d $SOURCEDIR ]; then
   if [ "$(ls -A $SOURCEDIR)" ]; then
     for File in $( ls $SOURCEDIR )
     do
       case $File in
-          pkguser.tar.xz|wget-list|md5sums|lfs-Makefile.patch) 
+          $pkguserFile|wget-list|md5sums|lfs-Makefile.patch) 
             continue #leave these in the source dir
           ;;
          ?*)
@@ -396,11 +411,11 @@ fi
 #
 GetSource () {
 #
-REPODIR=${LFS_BOOK_LOC_DIR}/$version
+REPODIR=${LFS_BOOK_LOC_DIR}/${version}
 SOURCEDIR=${LFS}${sourcedir}
-make -j1 -f $REPODIR/Makefile -C $REPODIR BASEDIR=$SOURCEDIR wget-list md5sums
-WgetList=$SOURCEDIR/wget-list
-md5sums=$SOURCEDIR/md5sums
+make -j1 -f ${REPODIR}/Makefile -C $REPODIR BASEDIR=$SOURCEDIR wget-list md5sums
+WgetList=${SOURCEDIR}/wget-list
+md5sums=${SOURCEDIR}/md5sums
 
 pushd $SOURCEDIR
     RequiredFiles=$( md5sum --quiet -c $md5sums 2> /dev/null | awk -F\: '!/OK/{printf "%s ",$1}' )
@@ -411,18 +426,17 @@ do
    Url=$( grep $File $WgetList )
    case $File in
        lfs-bootscripts*|udev-config*)
-          # idkw but md5sums never seem to match these
-       if [ ! -e $SOURCEDIR/$File ]; then
+       if [ ! -e ${SOURCEDIR}/${File} ]; then
          wget $WgetOpts -c $Url -O $SOURCEDIR/$File
        fi
        ;;
        ?*)
-         wget $WgetOpts -c $Url -O $SOURCEDIR/$File
+         wget $WgetOpts -c $Url -O ${SOURCEDIR}/${File}
         ;;
     esac
 done
 #set all the sources to owner lfs
-chown -h lfs $SOURCEDIR/* # because chapter05.sh is run as lfs
+chown -h lfs ${SOURCEDIR}/* # because chapter05.sh is run as lfs
 #
 } #end GetSource
 #
@@ -469,7 +483,7 @@ do
       combine[countc++]=${buildWrap[countbl++]} # the {: command
       until [[ "${commands[countg]}" == *install* ]]; do
        case "${commands[countg]}" in
-         *\\)
+         *\\) 
             storit[cont++]="${commands[countg++]}"
            ;;
            *)
@@ -681,7 +695,7 @@ esac
 #
 unpackpkguser () {
 cd ${LFS}${sourcedir}
-tar Jxf pkguser.tar.xz
+tar Jxf $pkguserFile
 cd $LFS
 } #end unpackpkguser
 #
@@ -689,7 +703,9 @@ pkguser () {
 cat >> $Output << "EOF"
 pkguser_ () {
 cd /tools
-tar vxf ${sourcedir}/pkguser.tar.xz
+EOF
+echo "tar vxf \${sourcedir}/${pkguserFile}" >> $Output
+cat >> $Output << "EOF"
 cd pkguser
 if [ "$?" != "0" ]; then
   echo "failed to extract pkguser tar file correctly"
@@ -1487,14 +1503,16 @@ fi
 #
 # main program  - call the functions
 #
-configEdit # option to change the config file
-retval=$?
-if [ $retval -eq $RETURN_PARAM ]; then
- echo "Cancel pressed. Exiting now"
- exit 1
+if $display_menu; then
+  configEdit # option to change the config file
+  retval=$?
+  if [ $retval -eq $RETURN_PARAM ]; then
+   echo "Cancel pressed. Exiting now"
+   exit 1
+  fi
+  source $cfg # maybe config edited - update the values
 fi
-source $cfg # maybe config edited - update the values
-if [ $BOOK = "svn" ]; then
+if [ "$BOOK" = svn ]; then
   GetSvnUrl # make sure the svn url is set
   if [ $BOOK_VERSION != "blank" ]; then #check if the requested book is present locally
     ChkLocalBook
@@ -1537,5 +1555,12 @@ else # sources are local
     exit 1
   fi
 fi
-unpackpkguser
+if [ -e ${LFS}${sourcedir}/${pkguserFile} ]; then
+  unpackpkguser
+else
+  echo "Package user file $pkguserFile not found in ${LFS}${sourcedir}"
+  echo "Please place it there in order to continue"
+  echo "Exiting now"
+  exit 1
+fi
 Start # build the scripts
