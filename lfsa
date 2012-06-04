@@ -1406,6 +1406,12 @@ do
           SrcName=tcl8
           Function
       ;;
+      pkgconfig)
+          PkgName=pkg-config
+          CmdName=pkg-config
+          SrcName=pkg-config-
+          Function
+      ;;
       changingowner|kernfs)
           Chapter=`echo $Chapter | sed s/05/06/`
           # changingowner is at the end of chapter 5 but needs root privilege so
