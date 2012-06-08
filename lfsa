@@ -215,7 +215,7 @@ return $RETURN_PARAM #requested book not present locally
 ChkLocalBookDetails () {
 if [ $BOOK_VERSION = "Current_Development" -o $BOOK_VERSION = "BOOK" ]; then
   # check the last svn date
-  returned_array=( `LastAccessSvn "$argument"` )
+  returned_array=( $(LastAccessSvn "$argument") )
   retval=$?
   if [ $retval -eq 0 ]; then # compare last svn date with today's date
     if [ ${returned_array[0]} -eq ${returned_array[1]} ]; then
@@ -343,7 +343,7 @@ DumpCommands () {
 REPODIR=${LFS_BOOK_LOC_DIR}/${version}
 SOURCEDIR=${LFS}${sourcedir}
 target=$( echo $1 | awk '{print tolower($1)}')
-SVNINFO="`svn info $REPODIR | awk '{printf $0"|"}'`"
+SVNINFO="$(svn info $REPODIR | awk '{printf $0"|"}')"
 # Note, tagged | on the end so it can be used as a record separator later
 # e.g.
 # echo $SVNINFO | awk 'BEGIN{ RS = "|" }; {print $0}'
@@ -723,7 +723,7 @@ fi
 cp /tools/pkguser/lib/* /usr/lib/pkgusr/
 cp -v /tools/pkguser/bin/* /usr/bin/
 cp -v /tools/pkguser/usr/sbin/* /usr/sbin/
-if [ "`grep -q ^install\: /etc/group;echo $?`" != "0" ]; then
+if [ "$(grep -q ^install\: /etc/group;echo $?)" != 0 ]; then
   groupadd -g 9999 install
 fi
 # make sure pkgusers can write to the logfile
@@ -780,7 +780,7 @@ case $PkgName in
 #
     case $PkgName in
         changingowner)
-        Chapter=`echo $Chapter | sed s/06/05/`
+        Chapter=$(echo $Chapter | sed s/06/05/)
     ;;
     esac
     WriteScript
@@ -822,7 +822,7 @@ echo "unpack05" >> $Output
       case $PkgName in
         chroot|kernfs|strippingagain|readjusting|adjusting|creatingdirs|createfiles)
           cat >> $Output << "EOF"
-if [ "`grep -q \"$FuncName\" $BuildLog;echo $?`" == "0" ]; then
+if [ "$(grep -q \"$FuncName\" $BuildLog;echo $?)" == 0 ]; then
   echo "skipping $FuncName" #package already built so skip
   return
 fi
@@ -929,7 +929,7 @@ IPS
 EOF
            resolvelinks
            cat >> $Output << "EOF"
-if [ "`grep -q ^$PkgName\: /etc/passwd;echo $?`" != "0" ]; then
+if [ "$(grep -q ^$PkgName\: /etc/passwd;echo $?)" != 0 ]; then
   installpkg $PkgName
 fi
 resolvelinks
@@ -980,7 +980,7 @@ IPS
 EOF
            resolvelinks
            cat >> $Output << "EOF"
-if [ "`grep -q ^$PkgName\: /etc/passwd;echo $?`" != "0" ]; then
+if [ "$(grep -q ^$PkgName\: /etc/passwd;echo $?)" != 0 ]; then
   installpkg $PkgName
 fi
 resolvelinks
@@ -1048,7 +1048,7 @@ IPS
 EOF
            resolvelinks
            cat >> $Output << "EOF"
-if [ "`grep -q ^$PkgName\: /etc/passwd;echo $?`" != "0" ]; then
+if [ "$(grep -q ^$PkgName\: /etc/passwd;echo $?)" != 0 ]; then
   installpkg $PkgName
 fi
 resolvelinks
@@ -1135,7 +1135,7 @@ cat << "EOF"
 unpack05 () {
 starttime=$( date +%s )
 cp ${LFS}${sourcedir}/${SrcName}*.* .
-cd `tar vxf ${SrcName}*z* | awk -F\/ 'END{print $1}'`
+cd $(tar vxf ${SrcName}*z* | awk -F\/ 'END{print $1}')
 
 endtime=$( date +%s )
 set +e
@@ -1152,7 +1152,7 @@ case $PkgName in
 unpack () {
 starttime=$( date +%s )
 cp ${sourcedir}/${SrcName}*.* .
-cd `tar vxf ${SrcName}???.tar*z* | awk -F\/ 'END{print $1}'`
+cd $(tar vxf ${SrcName}???.tar*z* | awk -F\/ 'END{print $1}')
 
 endtime=$( date +%s )
 set +e
@@ -1167,7 +1167,7 @@ EOF
 unpack () {
 starttime=$( date +%s )
 cp ${sourcedir}/${SrcName}*.* .
-cd `tar vxf ${SrcName}*z* | awk -F\/ 'END{print $1}'`
+cd $(tar vxf ${SrcName}*z* | awk -F\/ 'END{print $1}')
 
 endtime=$( date +%s )
 set +e
@@ -1182,7 +1182,7 @@ esac
 #
 TestBuiltCh5 () {
     cat >> $Output << "EOF"
-if [ "`grep -q \"$FuncName\" $BuildLog;echo $?`" == "0" ]; then
+if [ "$(grep -q \"$FuncName\" $BuildLog;echo $?)" == 0 ]; then
   echo "skipping $FuncName"
   return
 fi
@@ -1413,7 +1413,7 @@ do
           Function
       ;;
       changingowner|kernfs)
-          Chapter=`echo $Chapter | sed s/05/06/`
+          Chapter=$(echo $Chapter | sed s/05/06/)
           # changingowner is at the end of chapter 5 but needs root privilege so
           # makes sense to shift it into chapter06's 'requires root' script
           Output=$LFS/${Chapter}-asroot.sh
@@ -1424,7 +1424,7 @@ do
           # if you log out or reboot you need to mount the kernelfs again
           # so include some conditionals to look after this
           cat $LFS/${Chapter}-asroot.sh \
-          | awk '/mount -v/ { printf "if [ \"`grep -q \""$NF"\" /proc/mounts;echo $?`\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
+          | awk '/mount -v/ { printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
           >> $Output
           Function
       ;;
@@ -1432,7 +1432,7 @@ do
           Output=~/LFS-chroot.sh
           # use this once LFS chapter06 is done, again conditionals added
           cat $LFS/${Chapter}-asroot.sh \
-          | awk '/mount -v/ {printf "if [ \"`grep -q \""$NF"\" /proc/mounts;echo $?`\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
+          | awk '/mount -v/ {printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
           >> $Output
           WriteScript
       ;;
