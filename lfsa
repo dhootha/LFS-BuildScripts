@@ -39,8 +39,8 @@ else
   display_menu=true
   cfg=~/LFS.conf
 fi
-DumpedCommands=$LFS/lfs-commands
-Dumpedhtml=$LFS/lfs-html
+DumpedCommands=${LFS}/lfs-commands
+Dumpedhtml=${LFS}/lfs-html
 
 WgetOpts="" # Options for wget, e.g. proxy settings etc
 RETURN_PARAM=251  # return parameter from a function on error
@@ -54,6 +54,8 @@ if [ ! -e $BuildLog ]; then
   touch $BuildLog
   chown lfs:lfs $BuildLog #make lfs the owner
 fi
+SOURCEDIR=${LFS}${sourcedir}
+WgetList=${SOURCEDIR}/wget-list
 pkguserFile=pkguser.tar.xz # file holding the package-user build files
 #initialize the config variables
 TZ=$TZ
@@ -341,7 +343,6 @@ fi
 #
 DumpCommands () {
 REPODIR=${LFS_BOOK_LOC_DIR}/${version}
-SOURCEDIR=${LFS}${sourcedir}
 target=$( echo $1 | awk '{print tolower($1)}')
 SVNINFO="$(svn info $REPODIR | awk '{printf $0"|"}')"
 # Note, tagged | on the end so it can be used as a record separator later
@@ -379,9 +380,7 @@ done
 } # end of DumpCommands
 #
 CleanSourceDir () {
-SOURCEDIR=${LFS}${sourcedir}
 echo
-WgetList=${SOURCEDIR}/wget-list
 if [ -d $SOURCEDIR ]; then
   if [ "$(ls -A $SOURCEDIR)" ]; then
     for File in $( ls $SOURCEDIR )
@@ -412,9 +411,7 @@ fi
 GetSource () {
 #
 REPODIR=${LFS_BOOK_LOC_DIR}/${version}
-SOURCEDIR=${LFS}${sourcedir}
 make -j1 -f ${REPODIR}/Makefile -C $REPODIR BASEDIR=$SOURCEDIR wget-list md5sums
-WgetList=${SOURCEDIR}/wget-list
 md5sums=${SOURCEDIR}/md5sums
 
 pushd $SOURCEDIR
@@ -440,8 +437,28 @@ chown -h lfs ${SOURCEDIR}/* # because chapter05.sh is run as lfs
 #
 } #end GetSource
 #
+ChkSrcPresent () { 
+# $1 is the directory to check and $2 is the wget-list of files
+fileMissing=false
+dirtochk=$1
+wgetFile=$2
+while read FileUrl; do
+  if [[ ${FileUrl:0:1} != '#' ]]; then # ignore file if it has a hash at the start
+    filetofind=$( echo $FileUrl | awk -F\/ '{print $NF}' )
+    if [ ! -e ${dirtochk}/${filetofind} ]; then 
+      echo "file $filetofind not downloaded"
+      fileMissing=true
+    fi   
+  fi
+done < $wgetFile
+if $fileMissing; then 
+  return $RETURN_PARAM
+else
+  return 0
+fi
+} # end ChkSrcPresent
+#
 ChkEmptySrcFiles () {
-SOURCEDIR=${LFS}${sourcedir}
 zeroLenFiles=$(ls -l $SOURCEDIR|awk '!/^d/&&$5==0 {print $NF}')
 len=${#zeroLenFiles}
 if [ $len -eq 0 ]; then
@@ -760,18 +777,9 @@ EOF
 } # end of pkguser
 #
 delSrcFile () {
-echo "
-count=0
+echo "cd \$curdir
 cd ..
-for f in *.tar.*
-do
-cdfile[\$count]=\"\${f%.tar*}\"
-((count++))
-done
-#
-for (( i=0; i<\$count; i++ )); do
- rm -rf \${cdfile[\$i]}
-done"
+rm -rf \$curdir"
 } # end of delSrcFile
 #
 Function () {
@@ -856,6 +864,7 @@ sourcedir=$sourcedir" >> $Output
         unpack >> $Output
         cat >> $Output << "EOF"
 unpack
+curdir=$( echo $PWD ) #store the current dir for later deletion
 EOF
        ;;
      esac
@@ -953,25 +962,14 @@ touch ~/.${PkgName}
 endtime=$( date +%s )
 set +e
 EOF
-           if [[ "${PkgName}" = e2fsprogs || "${PkgName}" = udev ]]; then
-             delSrcFile | sed -e 's/cd ../cd ..\/../' >> $Output
-           elif [[ "${PkgName}" = "linux-headers" ]]; then
-             echo -e "cd ..\nrm -rf linux-*" >> $Output
-           elif [[ "${PkgName}" = "glibc" ]]; then #also delete glibc-build
-             delSrcFile | sed '/cd ../a rm -rf glibc-build' >> $Output
-           elif [[ "${PkgName}" = "binutils" ]]; then #also delete binutils-build
-             delSrcFile | sed '/cd ../a rm -rf binutils-build' >> $Output
-           elif [[ "${PkgName}" = "gcc" ]]; then #also delete gcc-build
-             delSrcFile | sed '/cd ../a rm -rf gcc-build' >> $Output
-           elif [[ "${PkgName}" = "xz-utils" ]]; then
-             echo -e "cd ..\nrm -rf xz-utils*\ncp \${sourcedir}/xz-* ." >> $Output
-           elif [[ "${PkgName}" = "texinfo" ]]; then
-             echo -e "cd ..\nrm -rf texinfo-4.13" >>$Output # no 'a' on the end
-           elif [[ "${PkgName}" = "vim" ]]; then
-             echo -e "cd ..\nrm -rf vim73" >>$Output
-           else 
-             delSrcFile >> $Output
-           fi
+delSrcFile >> $Output
+if [ "$PkgName" = glibc ]; then #also delete glibc-build
+  echo "rm -rf glibc-build" >> $Output
+elif [ "$PkgName" = binutils ]; then #also delete binutils-build
+  echo "rm -rf binutils-build" >> $Output
+elif [ "$PkgName" = gcc ]; then #also delete gcc-build
+  echo "rm -rf gcc-build" >> $Output
+fi
            cat >> $Output << "EOF"
 elapsedtime=$( expr $endtime - $starttime )
 set -e
@@ -1545,21 +1543,33 @@ DumpCommands LFS #parse the LFS xml
 if [ $SOURCES = "download" ]; then
   CleanSourceDir # clean the sources file if not empty
   GetSource # download all the sources
-  ChkEmptySrcFiles #check for failed downloads
-  return_val=$?
-  if [ "$return_val" -eq $RETURN_PARAM ]; then
-    echo "Empty source files found in ${LFS}${sourcedir}"
-    echo "Exiting now"
-    exit 1
-  fi
-else # sources are local
-  ChkEmptySrcFiles # check for any empty files
-  return_val=$?
-  if [ "$return_val" -eq $RETURN_PARAM ]; then
-    echo "Empty source files found in ${LFS}${sourcedir}"
-    echo "Exiting now"
-    exit 1
-  fi
+fi
+ChkSrcPresent $SOURCEDIR $WgetList # check for src files present
+ret_val=$?
+if [ $ret_val -eq $RETURN_PARAM ]; then 
+  echo "not all requested files in $WgetList have been downloaded"
+  echo "You will have to download the missing one(s) and place them in $SOURCEDIR"
+  echo "Do you wish to continue? (Y/n)"
+  read reply
+  case $reply in
+      [yY]|[yY][Ee][Ss])
+        echo "okay continue"
+      ;;        
+      [nN]|[nN][Oo])
+        echo "Exiting now"
+        exit 1
+      ;;        
+      *)   
+        echo "okay continue"
+      ;;        
+  esac
+fi
+ChkEmptySrcFiles #check for failed downloads
+return_val=$?
+if [ "$return_val" -eq $RETURN_PARAM ]; then
+  echo "Empty source files found in ${LFS}${sourcedir}"
+  echo "Exiting now"
+  exit 1
 fi
 if [ -e ${LFS}${sourcedir}/${pkguserFile} ]; then
   unpackpkguser
