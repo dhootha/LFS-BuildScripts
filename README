@@ -1,6 +1,6 @@
 Here is the recipe to use these scripts:
 First ensure you have these installed on your host:
-vim bison patch gawk dialog subversion xml2 xsltproc libxml2-utils and tidy
+vim bison patch gawk dialog subversion xml2 xsltproc libxml2-utils, tidy, docbook-xml and docbook-xsl.
 You can also change the dialog menus by using a .dialogrc in your root dir.
 go to: bash.cyberciti.biz/guide/Dialog_customization_with_configuration_file
 If you need the dialog source, it is here: ftp://invisible-island.net/dialog
@@ -12,10 +12,10 @@ mkfs.ext4 /dev/sda(x) for all of them - plus mkswap /dev/sda(x)
 2. Edit chapter02.sh to match your partitions and run the script
 3. Same with chapter03.sh
 
-4. Copy the files: lfs-Makefile.patch and pkguser.tar.xz to $LFS/sources
-Don't change these names. They are hardwired into the lfsa script.
+4. Copy the file pkguser.tar.xz to $LFS/sources
+Don't change the name. It is hardwired into the lfsa script.
 
-5. copy lfsa to $LFS
+5. copy lfsa to $LFS. You can run lfsa from your host if you want.
 
 6. Create a lfs user as per the book. Don't forget to set up the lfs 
 environment too. Do: echo $LFS_TGT and make sure something is
@@ -25,11 +25,9 @@ returned.
 sources will be downloaded, the requested LFS book svn'd and the following scripts created in $LFS - chapter05.sh, chapter06-asroot.sh, chapter06-chroot.sh,
 chapter06.sh and lastly chapter08.sh. Copy chapter07.sh to $LFS and edit to match your environment. Run the scripts in chapter order. Run chapter05.sh as user lfs; all the others as root.
 
-The scripts have been tested with  LFS version 7.1 and 'Current Development'. You
-don't need the patch with 'Current Development'. Older versions may
-break - they haven't been tested.
+The scripts only work with 'Current Development'. I'm waiting for v.7.3 to be released before testing to make sure they work with a release version. Older versions may break - they haven't been tested.
 
-chapter08.sh creates a placeholder to build the kernel.
+chapter08.sh creates a placeholder to build the kernel. You can add your kernel .config file to $LFS/sources at the start and it will build your kernel without your intervention. You have to select this option when you run lfsa.
 
 When the scripts have finished, follow chapter 8 from the book to
 install the kernel. Do su kernel to enter the kernel dir. mkproper has already
@@ -62,6 +60,8 @@ If you decide to run the tests, you may well find that the gcc tests fail. I got
 21 failures with libmudflap and this stopped the script running. You'll have to
 restart the script with the tests set to no. Do this in the config file edit at
 the start of the lfsa script.
+
+I recently (08/12) added an option to install everything as root, instead of a package user.
 
 Release2.7 - updates from lfs-dev version of the book
 Release2.6 - added a check that all sources have been downloaded

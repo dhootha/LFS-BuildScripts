@@ -908,6 +908,11 @@ if [ "$?" != "0" ]; then
 fi
 cp ./sbin/* /tools/bin
 cp ./usr/sbin/* /tools/bin
+if [ $(uname -m) = x86_64 ]; then
+  mv /tools/bin/su64 /tools/bin/su
+else
+  mv /tools/bin/su32 /tools/bin/su
+fi
 if [ ! -d /etc/pkgusr/skel-package ]; then
   mkdir -p /etc/pkgusr/skel-package
 fi
@@ -1200,8 +1205,8 @@ EOF
               cat >> $Output << "EOF"
 chown root /bin/ping*
 chmod 4755 /bin/ping*
-chown root /sbin/traceroute
-chmod 4755 /sbin/traceroute
+chown root /bin/traceroute
+chmod 4755 /bin/traceroute
 chown root /usr/bin/{rcp,rlogin,rsh}
 chmod 4755 /usr/bin/{rcp,rlogin,rsh}
 EOF
@@ -1226,6 +1231,7 @@ EOF
               cat >> $Output << "EOF"
 chgrp install /usr/share/aclocal
 chmod g+w,o+t /usr/share/aclocal
+chown -h bash:bash /bin/sh
 EOF
             ;;
             man-db) #/es,it,ru
@@ -1244,6 +1250,8 @@ EOF
               cat >> $Output << "EOF"
 chgrp install /lib/udev/rules.d
 chmod g+w,o+t /lib/udev/rules.d
+chgrp install /lib/firmware
+chmod g+w,o+t /lib/firmware
 EOF
             ;;
           esac # end case pkgname
