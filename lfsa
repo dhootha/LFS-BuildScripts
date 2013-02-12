@@ -1193,13 +1193,12 @@ EOF
               cat >> $Output << "EOF"
 chgrp install /usr/share/aclocal
 chmod g+w,o+t /usr/share/aclocal
-EOF
-            ;;
-            ncurses) #/usr/lib/pkgconfig
-              cat >> $Output << "EOF"
 chgrp install /usr/lib/pkgconfig
 chmod g+w,o+t /usr/lib/pkgconfig
 EOF
+            ;;
+            ncurses)
+chown 0.0 /etc/ld.so.cache
             ;;
             inetutils) # ping, etc setuid root
               cat >> $Output << "EOF"
@@ -1246,12 +1245,29 @@ chmod g+w,o+t /usr/share/man/it
 chmod g+w,o+t /usr/share/man/it/man*
 EOF
             ;;
+            man-pages)
+              cat >> $Output << "EOF"
+chown man-pages /usr/share/man/man*
+EOF
+            ;;
             udev)
               cat >> $Output << "EOF"
 chgrp install /lib/udev/rules.d
 chmod g+w,o+t /lib/udev/rules.d
 chgrp install /lib/firmware
 chmod g+w,o+t /lib/firmware
+EOF
+            ;;
+            vim) # man pages
+              cat >> $Output << "EOF"
+chgrp install /usr/share/man/fr*
+chgrp install /usr/share/man/it*
+chgrp install /usr/share/man/pl*
+chgrp install /usr/share/man/ru*
+chmod g+w,o+t /usr/share/man/fr*
+chmod g+w,o+t /usr/share/man/it*
+chmod g+w,o+t /usr/share/man/pl*
+chmod g+w,o+t /usr/share/man/ru*
 EOF
             ;;
           esac # end case pkgname
@@ -1289,7 +1305,7 @@ fi
 set +e # ldconfig might not exist yet
 ldconfig
 set -e
-rm ${PkgUserDir}/{coreutils/.coreutils,udev/.udev,shadow/.shadow} # in prep for blfs
+rm ${PkgUserDir}/{coreutils/{.coreutils,build},udev/{.udev,build},shadow/{.shadow,build}} # in prep for blfs
 EOF
       else
          cat >> $Output << "EOF"
@@ -1354,6 +1370,9 @@ case $PkgName in
     ;;
     coreutils)
         links="/bin/{cat,echo,false,pwd,stty} /etc/group"
+    ;;
+    ncurses)
+        links="/etc/ld.so.cache"
     ;;
     perl)
         links="/usr/bin/perl"
@@ -1510,6 +1529,16 @@ EOF
 #
 WriteScript () {
 case $PkgName in
+    binutils)
+        # check if the build dir exists
+        GetCommands \
+        | awk '{if ($1 == "mkdir" && $2 =="-v")
+print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
+else
+print $0
+}' \
+        >> $Output
+    ;;
     glibc)
         # set up glibc's timezone
         # + fix the builddir issue
@@ -1534,18 +1563,13 @@ print $0
         | sed -e '/ulimit -s/d' \
               -e '/contrib\/test_summary/d' \
               -e "/ln -sv gcc/ a set +e" \
+        | awk '{if ($1 == "mkdir" && $2 =="-v")
+print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
+else
+print $0
+}' \
         >> $Output
         echo "set -e" >> $Output
-    ;;
-    check)
-        GetCommands \
-        | sed -e 's/.\/configure/CFLAGS="-L\/tools\/lib -lpthread" .\/configure/' \
-        >> $Output
-    ;;
-    util-linux)
-        GetCommands \
-        | sed -e 's/--disable-login/--disable-login --disable-kill --disable-utmpdump/' \
-        >> $Output
     ;;
     e2fsprogs)
         GetCommands \
@@ -1574,7 +1598,7 @@ print $0
     procps)
        #
        GetCommands \
-        | sed -e '/make install/ i sed -i /ldconfig/d Makefile' \
+        | sed -e '/pushd/,/popd/d' \
         >> $Output
     ;;
     stripping)
@@ -1764,6 +1788,11 @@ do
           SrcName=pkg-config-
           Function
       ;;
+      procps)
+          CmdName=procps-ng
+          SrcName=procps-ng-
+          Function
+      ;;
       changingowner|kernfs)
           Chapter=$(echo $Chapter | sed s/05/06/)
           # changingowner is at the end of chapter 5 but needs root privilege so
@@ -1811,10 +1840,25 @@ do
   done
 done
 #
-for Script in $LFS/chapter{05,06,08,06-asroot,06-chroot} ~/LFS-chroot
+for eachScript in $LFS/chapter{05,06,08,06-asroot,06-chroot} ~/LFS-chroot
 do
-  Output=${Script}.sh
-  awk '/_\ \(\)\ \{/ {print $1}' $Output >> $Output
+  Output=${eachScript}.sh
+# match the start line for each function and output it
+  awk '/_\ \(\)\ \{/ {print $1}' $Output >> /tmp/.7654321 #write to a temp file
+#
+#have a chance to reset the function order here
+#
+  while read eachFunc; do
+    if [ "$eachFunc" = check_ ]; then # put check later because it fails at moment
+      continue # don't write it yet
+    elif [ "$eachFunc" = stripping_ ]; then # write check here
+      echo check_ >> $Output
+      echo $eachFunc >> $Output
+    else
+      echo $eachFunc >> $Output
+    fi
+  done < /tmp/.7654321
+  rm /tmp/.7654321
   chmod 700 $Output
 done
 sed -e 's@BuildLog='$LFS'@BuildLog=@' -i $LFS/{chapter06.sh,chapter08.sh}
