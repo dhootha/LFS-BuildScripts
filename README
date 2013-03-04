@@ -13,25 +13,29 @@ mkfs.ext4 /dev/sda(x) for all of them - plus mkswap /dev/sda(x)
 3. Same with chapter03.sh
 
 4. Copy the file pkguser.tar.xz to $LFS/sources
-Don't change the name. It is hardwired into the lfsa script.
+If you don't want to use this name for the package user data, you can change the name in the config set up. It should be a compressed tarball of some description though.
 
-5. copy lfsa to $LFS. You can run lfsa from your host if you want.
+5. copy lfsa to $LFS. You can run lfsa from your host if you prefer. It makes no difference.
 
 6. Create a lfs user as per the book. Don't forget to set up the lfs 
-environment too. Do: echo $LFS_TGT and make sure something is
+environment too. Do: echo $LFS_TGT and make sure something sensible is
 returned.
 
 7. Run lfsa as root.  Edit the config file to suit. If requested, the
 sources will be downloaded, the requested LFS book svn'd and the following scripts created in $LFS - chapter05.sh, chapter06-asroot.sh, chapter06-chroot.sh,
 chapter06.sh and lastly chapter08.sh. Copy chapter07.sh to $LFS and edit to match your environment. Run the scripts in chapter order. Run chapter05.sh as user lfs; all the others as root.
 
-The scripts only work with 'Current Development'. I'm waiting for v.7.3 to be released before testing to make sure they work with a release version. Older versions may break - they haven't been tested.
+The scripts have been tested with version 7.3 and current svn. Older versions may break - they haven't been tested.
 
-chapter08.sh creates a placeholder to build the kernel. You can add your kernel .config file to $LFS/sources at the start and it will build your kernel without your intervention. You have to select this option when you run lfsa.
+chapter08.sh creates a placeholder to build the kernel. You can add your kernel .config file to $LFS/sources at the start and it will build your kernel without your intervention. You have to select this option in the config file when you run lfsa.
 
 When the scripts have finished, follow chapter 8 from the book to
 install the kernel. Do su kernel to enter the kernel dir. mkproper has already
 been run.
+
+I've given you an option to install everything as root rather than a package user. You might prefer to use a script to do that rather that jhalfs.
+
+I've also been playing with installing LFS with systemd instead of sysvinit. You can try this if you like, but I don't guarantee that it all works.
 
 The package-user management system uses three main scripts:-
 
@@ -63,6 +67,7 @@ the start of the lfsa script.
 
 I recently (08/12) added an option to install everything as root, instead of a package user.
 
+Release2.8 - tested working with version 7.3
 Release2.7 - updates from lfs-dev version of the book
 Release2.6 - added a check that all sources have been downloaded
 Release2.5 - some code tidying to remove backticks and replace with $(...)
