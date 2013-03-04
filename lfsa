@@ -1394,10 +1394,12 @@ chown root /bin/{mount,umount}
 chmod 4755 /bin/{mount,umount}
 chown root:tty /usr/bin/wall
 chmod 2755 /usr/bin/wall
-chgrp install /lib/systemd # if dbus installed
-chmod g+w,o+t /lib/systemd
-chgrp install /lib/systemd/system
-chmod g+w,o+t /lib/systemd/system
+if [ -e /lib/systemd ]; then
+  chgrp install /lib/systemd # if dbus installed
+  chmod g+w,o+t /lib/systemd
+  chgrp install /lib/systemd/system
+  chmod g+w,o+t /lib/systemd/system
+fi
 EOF
             ;;
             shadow)
