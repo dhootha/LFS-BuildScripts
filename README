@@ -35,7 +35,7 @@ been run.
 
 I've given you an option to install everything as root rather than a package user. You might prefer to use a script to do that rather that jhalfs.
 
-I've also been playing with installing LFS with systemd instead of sysvinit. You can try this if you like, but I don't guarantee that it all works.
+You can now install LFS with systemd instead of sysvinit, if you wish. I've tried this a couple of times and it works. Use the systemd version of the chapter07 script, when you get to that.
 
 The package-user management system uses three main scripts:-
 
@@ -67,6 +67,7 @@ the start of the lfsa script.
 
 I recently (08/12) added an option to install everything as root, instead of a package user.
 
+Release2.9 - updated the scripts to be able to request systemd instead of sysvinit
 Release2.8 - tested working with version 7.3
 Release2.7 - updates from lfs-dev version of the book
 Release2.6 - added a check that all sources have been downloaded
