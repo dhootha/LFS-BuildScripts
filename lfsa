@@ -1361,10 +1361,12 @@ EOF
               cat >> $Output << "EOF"
 chown root:install /usr/share/info/dir
 chmod 664 /usr/share/info/dir
-chown root /usr/lib/glibc/pt_chown
-chmod 4755 /usr/lib/glibc/pt_chown
+chown root /usr/lib/pt_chown
+chmod 4755 /usr/lib/pt_chown
 chgrp install /usr/include/sys # for libcap
 chmod g+w,o+t /usr/include/sys
+chgrp install /var/db
+chmod g+w,o+t /var/db
 EOF
             ;;
             pkg-config) #/usr/share/aclocal
@@ -1480,6 +1482,8 @@ EOF
               cat >> $Output << "EOF"
 chgrp install /lib/udev/rules.d
 chmod g+w,o+t /lib/udev/rules.d
+chgrp install /etc/udev/rules.d
+chmod g+w,o+t /etc/udev/rules.d
 chgrp install /usr/share/pkgconfig
 chmod g+w,o+t /usr/share/pkgconfig
 chgrp install /usr/share/polkit-1 # for polkit
@@ -1488,12 +1492,23 @@ chgrp install /usr/share/polkit-1/actions
 chmod g+w,o+t /usr/share/polkit-1/actions
 chgrp install /etc/xdg # for at-spi2-core
 chmod g+w,o+t /etc/xdg
+chgrp install /usr/share/bash-completion/completions
+chmod g+w,o+t /usr/share/bash-completion/completions
+chgrp install /lib/systemd/system/shutdown.target.wants
+chmod g+w,o+t /lib/systemd/system/shutdown.target.wants
 # systemd-detect-virt-install-hook
 /usr/sbin/setcap cap_dac_override,cap_sys_ptrace=ep /usr/bin/systemd-detect-virt
 EOF
             ;;
             dbus)
               cat >> $Output << "EOF"
+if [ "$(grep -q ^messagebus /etc/group; echo $?)" != 0 ]; then
+  groupadd -g 18 messagebus
+  useradd -c "D-Bus Message Daemon User" -d /var/run/dbus \
+        -u 18 -g messagebus -s /bin/false messagebus
+fi
+chown root:messagebus /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+chmod 4750 /usr/lib/dbus-1.0/dbus-daemon-launch-helper
 chgrp install /usr/lib/dbus-1.0
 chmod g+w,o+t /usr/lib/dbus-1.0
 chgrp install /usr/share/dbus-1
@@ -1506,6 +1521,10 @@ chgrp install /usr/include/dbus-1.0/dbus
 chmod g+w,o+t /usr/include/dbus-1.0/dbus
 chgrp install /etc/dbus-1/system.d
 chmod g+w,o+t /etc/dbus-1/system.d
+chgrp install /lib/systemd/
+chmod g+w,o+t /lib/systemd/
+chgrp install /lib/systemd/system
+chmod g+w,o+t /lib/systemd/system
 chgrp install /lib/systemd/system/sockets.target.wants
 chmod g+w,o+t /lib/systemd/system/sockets.target.wants
 chgrp install /lib/systemd/system/multi-user.target.wants
@@ -1810,8 +1829,31 @@ EOF
 #
 WriteScript () {
 case $PkgName in
+    attr) # present in a systemd version of lfs
+        GetCommands \
+         | sed -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(PKG_BIN_DIR)/d' attr\/Makefile" \
+               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(PKG_BIN_DIR)/d' getfattr\/Makefile" \
+               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(PKG_BIN_DIR)/d' setfattr\/Makefile" \
+               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man1\/Makefile" \
+               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man2\/Makefile" \
+               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man3\/Makefile" \
+               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man5\/Makefile" \
+         >> $Output
+    ;;
+    bash)
+       GetCommands \
+        | sed -e '/nobody/d' \
+              -e '/--login/d' \
+        >> $Output
+
+    ;;
+    bc)
+       GetCommands \
+        | sed -e '/echo "quit"/d' \
+        >> $Output
+
+    ;;
     binutils)
-        if [ "$FuncName" = binutilspass2 ]; then # add sysroot to configure
           # check if the build dir exists
           GetCommands \
           | awk '{if ($1 == "mkdir" && $2 =="-v")
@@ -1819,17 +1861,56 @@ print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
 else
 print $0
 }' \
-          | sed -e 's/\/tools\/lib/\/tools\/lib --with-sysroot=\$LFS/' \
           >> $Output
-        else
-          GetCommands \
-          | awk '{if ($1 == "mkdir" && $2 =="-v")
+    ;;
+    coreutils)
+        GetCommands \
+        | sed -e "/make NON_ROOT_USERNAME=nobody/,/sed -i '\/dummy\/d' \/etc\/group/d" \
+        >> $Output
+    ;;
+    createfiles)
+        # can't start a new shell just yet - it'll stop the script
+        GetCommands \
+        | sed '/exec \/tools\/bin\/bash --login +h/d' \
+        >> $Output
+    ;;
+    creatingdirs)
+        GetCommands \
+        | sed -e 's/mkdir -v/mkdir -pv/' \
+        >> $Output
+    ;;
+    e2fsprogs)
+        GetCommands \
+        | sed -e 's/mkdir -v build/mkdir -v e2fsprogs-build/' \
+              -e 's/cd build/cd e2fsprogs-build/' \
+        >> $Output
+    ;;
+    gawk|flex)
+        # gawk-4.0.0's make check has a race condition, so force jobs to 1
+        # so does flex-2.5.35
+        #
+        GetCommands \
+        | sed -e 's/check/-j1 check/' \
+        >> $Output
+    ;;
+    gcc)
+        GetCommands \
+        | sed -e '/ulimit -s/d' \
+              -e '/contrib\/test_summary/d' \
+              -e "/ln -sv gcc/ a set +e" \
+        | awk '{if ($1 == "mkdir" && $2 =="-v")
 print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
 else
 print $0
 }' \
-          >> $Output
-        fi
+        >> $Output
+        echo "set -e" >> $Output
+    ;;
+    gettext) # update with current version
+        GetCommands \
+        | sed -e '/--docdir=\/usr\/share\/doc\/gettext/d' \
+              -e "/configure --prefix/a\              --docdir=\/usr\/share\/doc\/gettext-${gettextvers}" \
+        >> $Output
     ;;
     glibc)
         # set up glibc's timezone
@@ -1850,78 +1931,40 @@ print $0
 }' \
         >> $Output
     ;;
-    gcc)
-        GetCommands \
-        | sed -e '/ulimit -s/d' \
-              -e '/contrib\/test_summary/d' \
-              -e "/ln -sv gcc/ a set +e" \
-        | awk '{if ($1 == "mkdir" && $2 =="-v")
-print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
-else
-print $0
-}' \
-        >> $Output
-        echo "set -e" >> $Output
-    ;;
-    e2fsprogs)
-        GetCommands \
-        | sed -e 's/mkdir -v build/mkdir -v e2fsprogs-build/' \
-              -e 's/cd build/cd e2fsprogs-build/' \
-        >> $Output
-    ;;
-    bash)
-       GetCommands \
-        | sed -e '/nobody/d' \
-              -e '/--login/d' \
-        >> $Output
-
-    ;;
-    groff)
-        GetCommands \
-        | sed -e 's/\*\*EDITME<paper_size>EDITME\*\*/'$PAPER_SIZE'/' \
-        >> $Output
-    ;;
     gmp)
         # if building for 64bit need to remove config for 32
         GetCommands \
         | sed -e '/ABI=32/d' \
         >> $Output
     ;;
-    procps)
-       #
-       GetCommands \
-        | sed -e '/pushd/,/popd/d' \
-        >> $Output
-    ;;
-    stripping)
-        # strip always exits with 1, so toggle bash's -e flag
-        echo "set +e" >> $Output
+    groff)
         GetCommands \
-        >> $Output
-        echo "set -e" >> $Output
-    ;;
-    creatingdirs)
-        GetCommands \
-        | sed -e 's/mkdir -v/mkdir -pv/' \
-        >> $Output
-    ;;
-    createfiles)
-        # can't start a new shell just yet - it'll stop the script
-        GetCommands \
-        | sed '/exec \/tools\/bin\/bash --login +h/d' \
-        >> $Output
-    ;;
-    gawk|flex)
-        # gawk-4.0.0's make check has a race condition, so force jobs to 1
-        # so does flex-2.5.35
-        #
-        GetCommands \
-        | sed -e 's/check/-j1 check/' \
+        | sed -e 's/\*\*EDITME<paper_size>EDITME\*\*/'$PAPER_SIZE'/' \
         >> $Output
     ;;
     kbd)
         GetCommands \
         | sed -e 's/\(.*\)&&$/\1/' \
+        >> $Output
+    ;;
+    kernel)
+      if [ "$MAKE_KERNEL" = yes ]; then
+        GetCommands \
+        | sed -e '/make mrproper/,/End of editable block/d' \
+              -e '/cp -v arch/,/cp -v .config/d' \
+              -e 's/linux-'"${linuxcomvers}"'/linux-'"${linuxvers}"'/' \
+        >> $Output
+      fi
+    ;;
+    perl)
+        GetCommands \
+        | sed -e "/tar xf ..\/XML-Parser-2.41.tar.gz/,/make install/d" \
+        >> $Output
+    ;;
+    procps)
+       #
+       GetCommands \
+        | sed -e '/pushd/,/popd/d' \
         >> $Output
     ;;
     shadow)
@@ -1942,39 +1985,12 @@ print $0
               -e '/grpconv/d' \
         >> $Output
     ;;
-    coreutils)
+    stripping)
+        # strip always exits with 1, so toggle bash's -e flag
+        echo "set +e" >> $Output
         GetCommands \
-        | sed -e "/make NON_ROOT_USERNAME=nobody/,/sed -i '\/dummy\/d' \/etc\/group/d" \
         >> $Output
-    ;;
-    inetutils) # systemd version has make html, so remove it
-        GetCommands \
-        | sed -e '/make -C doc/d' \
-        >> $Output
-    ;;
-    perl)
-        GetCommands \
-        | sed -e "/tar xf ..\/XML-Parser-2.41.tar.gz/,/make install/d" \
-        >> $Output
-    ;;
-    sysklogd)
-       # fix the Make file to use the install wrapper and not the default install bin
-       GetCommands \
-        | awk '{if ($NF == "install" && $1 == "make") $1 = "  make INSTALL=install"; print $0}' \
-        >> $Output
-    ;;
-    texinfo)
-        # tries, and fails, to rebuild /usr/share/info/dir
-        # replaced with a harmless for loop
-        GetCommands \
-        | sed -e '/cd \/usr\/share\/info/,/done/d' \
-        >> $Output
-    ;;
-    vim)
-        GetCommands \
-        | sed -e 's/make test/make -j1 test/' \
-              -e '/:options/d' \
-        >> $Output
+        echo "set -e" >> $Output
     ;;
     strippingagain)
         GetCommands \
@@ -1999,25 +2015,29 @@ echo "
 #"
 EOF
     ;;
-    kernel)
-      if [ "$MAKE_KERNEL" = yes ]; then
-        GetCommands \
-        | sed -e '/make mrproper/,/End of editable block/d' \
-              -e '/cp -v arch/,/cp -v .config/d' \
-              -e 's/linux-'"${linuxcomvers}"'/linux-'"${linuxvers}"'/' \
+    sysklogd)
+       # fix the Make file to use the install wrapper and not the default install bin
+       GetCommands \
+        | awk '{if ($NF == "install" && $1 == "make") $1 = "  make INSTALL=install"; print $0}' \
         >> $Output
-      fi
     ;;
-    attr) # present in a systemd version of lfs
+    systemd) # update the version in the configure section
+       GetCommands \
+        | sed -e '/--docdir=\/usr\/share\/doc\/systemd/d' \
+              -e 's/--without-python/--without-python --docdir=\/usr\/share\/doc\/systemd-'${systemdvers}'/' \
+        >> $Output
+    ;;
+    texinfo)
+        # tries, and fails, to rebuild /usr/share/info/dir
         GetCommands \
-         | sed -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(PKG_BIN_DIR)/d' attr\/Makefile" \
-               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(PKG_BIN_DIR)/d' getfattr\/Makefile" \
-               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(PKG_BIN_DIR)/d' setfattr\/Makefile" \
-               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man1\/Makefile" \
-               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man2\/Makefile" \
-               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man3\/Makefile" \
-               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man5\/Makefile" \
-         >> $Output
+        | sed -e '/cd \/usr\/share\/info/,/done/d' \
+        >> $Output
+    ;;
+    vim)
+        GetCommands \
+        | sed -e 's/make test/make -j1 test/' \
+              -e '/:options/d' \
+        >> $Output
     ;;
     *)
         GetCommands \
@@ -2071,40 +2091,6 @@ do
     CmdName=$Name
     Output=$LFS/${Chapter}.sh
     case $PkgName in
-      introduction|toolchaintechnotes|generalinstructions|pkgmgt|aboutdebug)
-      continue
-      ;;
-      linux-headers|kernel)
-          SrcName=linux-
-          Function
-      ;;
-      xz)
-          CmdName=xz-utils
-          Function
-      ;;
-      expect)
-          SrcName=expect5
-          Function
-      ;;
-      tcl)
-          SrcName=tcl8
-          Function
-      ;;
-      pkgconfig)
-          PkgName=pkg-config
-          CmdName=pkg-config
-          SrcName=pkg-config-
-          Function
-      ;;
-      procps)
-          CmdName=procps-ng
-          SrcName=procps-ng-
-          Function
-      ;;
-      libcap)
-          SrcName=libcap2_
-          Function
-      ;;
       changingowner|kernfs)
           Chapter=$(echo $Chapter | sed s/05/06/)
           # changingowner is at the end of chapter 5 but needs root privilege so
@@ -2121,14 +2107,6 @@ do
           >> $Output
           Function
       ;;
-      revisedchroot)
-          Output=~/LFS-chroot.sh
-          # use this once LFS chapter06 is done, again conditionals added
-          cat $LFS/${Chapter}-asroot.sh \
-          | awk '/mount -v/ {printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
-          >> $Output
-          WriteScript
-      ;;
       createfiles)
           Function
           # Now have a base file structure so add pkguser
@@ -2138,8 +2116,27 @@ do
             copypkguserbin # add listpkg only.
           fi
       ;;
+      expect)
+          SrcName=expect5
+          Function
+      ;;
       fstab) # can't deal with this here
           continue
+      ;;
+      introduction|toolchaintechnotes|generalinstructions|pkgmgt|aboutdebug)
+      continue
+      ;;
+      libcap)
+          SrcName=libcap2_
+          Function
+      ;;
+      libstdc++)
+          SrcName=gcc-
+          Function
+      ;;
+      linux-headers|kernel)
+          SrcName=linux-
+          Function
       ;;
       perl) # if systemd and chapter06, need to install xml-parser
           if [[ "$Chapter" == chapter06 && "$SYSTEMD" == yes ]]; then
@@ -2153,6 +2150,33 @@ do
             Function
           fi
       ;;
+      pkgconfig)
+          PkgName=pkg-config
+          CmdName=pkg-config
+          SrcName=pkg-config-
+          Function
+      ;;
+      procps)
+          CmdName=procps-ng
+          SrcName=procps-ng-
+          Function
+      ;;
+      revisedchroot)
+          Output=~/LFS-chroot.sh
+          # use this once LFS chapter06 is done, again conditionals added
+          cat $LFS/${Chapter}-asroot.sh \
+          | awk '/mount -v/ {printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
+          >> $Output
+          WriteScript
+      ;;
+      tcl)
+          SrcName=tcl8
+          Function
+      ;;
+      xz)
+          CmdName=xz-utils
+          Function
+      ;;
       *)
           if [[ "$Chapter" == chapter08 && "$PkgName" == grub ]]; then #want the grub in chapter06 but not the one in chapter08
             continue
@@ -2164,17 +2188,19 @@ do
   done
 done
 #
+tempfile=/tmp/$(date +%d%B%Y_%H:%M)tmp.file
 for eachScript in $LFS/chapter{05,06,08,06-asroot,06-chroot} ~/LFS-chroot
 do
   Output=${eachScript}.sh
 # match the start line for each function and output it
-  awk '/_\ \(\)\ \{/ {print $1}' $Output >> /tmp/.7654321 #write to a temp file
+  awk '/_\ \(\)\ \{/ {print $1}' $Output >> $tempfile #write to a temp file
 #
-#have a chance to reset the function order here
+# you have an opportunity to reset the function order here
 #
   while read eachFunc; do
-# move check later in the build order
-#    if [ "$eachFunc" = check_ ]; then # put check later because it fails at moment
+#
+# move check later in the build order because it failed to compile in the orig position
+#    if [ "$eachFunc" = check_ ]; then # put check later because it fails at the moment
 #      continue # don't write it yet
 #    elif [ "$eachFunc" = stripping_ ]; then # write check here
 #      echo check_ >> $Output
@@ -2182,9 +2208,11 @@ do
 #    else
 #      echo $eachFunc >> $Output
 #    fi
+# check is fine now so commented out the re-positioning
+#
       echo $eachFunc >> $Output
-  done < /tmp/.7654321
-  rm /tmp/.7654321
+  done < $tempfile
+  rm $tempfile
   chmod 700 $Output
 done
 sed -e 's@BuildLog='$LFS'@BuildLog=@' -i $LFS/{chapter06.sh,chapter08.sh}
@@ -2327,10 +2355,20 @@ else
     exit 1
   fi
 fi
+# get the required package versions
 rtrvers=""
 GetPkgVersion $SourceDir perl- tar
 perlvers=$rtrvers
 echo "will install perl version $perlvers"
+rtrvers=""
+GetPkgVersion $SourceDir systemd- tar
+systemdvers=$rtrvers
+echo "systemd version is $systemdveirs"
+rtrvers=""
+GetPkgVersion $SourceDir gettext- tar
+gettextvers=$rtrvers
+echo "gettext is version $gettextvers"
+#
 pkguserFile=$PKGUSERFILE
 if [ -e ${LFS}${sourcedir}/${pkguserFile} ]; then
   unpackpkguser

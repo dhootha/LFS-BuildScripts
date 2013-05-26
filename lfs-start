@@ -1,0 +1,7 @@
+mkdir -pv /{bin,boot,etc/{opt,sysconfig},home,lib,mnt,opt,run}
+mkdir -pv /{media/{floppy,cdrom},sbin,srv,var}
+install -dv -m 1777 /tmp /var/tmp
+mkdir -pv /usr/{,local/}{bin,include,lib,sbin,src}
+mkdir -pv /usr/{,local/}share/{doc,info,locale,man}
+mkdir -pv /var/{opt,cache,lib/{misc,locate},local}
+touch /var/log/{btmp,lastlog,wtmp}
