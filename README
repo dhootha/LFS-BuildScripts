@@ -34,7 +34,7 @@ been run.
 
 I've given you an option to install everything as root rather than a package user. You might prefer to use a script to do that rather that jhalfs.
 
-You can now install LFS with systemd instead of sysvinit. Select SYSTEMD=yes in the lfsa confi file. Select sources=download and it will include the required systemd source files in the downloaded files. Use the systemd version of the chapter07 script, when you get to that. I tested this with version 7.4 and svn, but earlier versions will probably break.
+You can now install LFS with systemd instead of sysvinit. Select SYSTEMD=yes in the lfsa config file. Select SOURCES=download and it will include the required systemd source files in the downloaded files. Use the systemd version of the chapter07 script, when you get to that. I tested this with version 7.4 and svn, but earlier versions will probably break.
 
 The updategrub.sh script will update your /boot/grub/grub.cfg file on your host in order to boot into LFS. If this is how you start LFS, edit the script to suit your host (run blkid to see the uuid values for your disks).
 
