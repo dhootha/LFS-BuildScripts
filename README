@@ -7,7 +7,7 @@ If you need the dialog source, it is here: ftp://invisible-island.net/dialog
 - use the tar.gz version.
 
 1. create your partitions. I suggest you do:
-mkfs.ext4 /dev/sda(x) for all of them - plus mkswap /dev/sda(x)
+mkfs.ext4 /dev/sda(x) for all of them - plus mkswap /dev/sda(x) or you can edit createPart.sh and run that.
 
 2. Edit chapter02.sh to match your partitions and run the script
 3. Same with chapter03.sh
@@ -22,10 +22,9 @@ environment too. Do: echo $LFS_TGT and make sure something sensible is
 returned.
 
 7. Run lfsa as root.  Edit the config file to suit. If requested, the
-sources will be downloaded, the requested LFS book svn'd and the following scripts created in $LFS - chapter05.sh, chapter06-asroot.sh, chapter06-chroot.sh,
-chapter06.sh and lastly chapter08.sh. Copy chapter07.sh to $LFS and edit to match your environment. Run the scripts in chapter order. Run chapter05.sh as user lfs; all the others as root.
+sources will be downloaded, the requested LFS book svn'd and the following scripts created in $LFS - chapter05.sh, chapter06-asroot.sh, chapter06-chroot.sh, chapter06.sh and lastly chapter08.sh. Copy chapter07.sh to $LFS and edit to match your environment. Run the scripts in chapter order. Run chapter05.sh as user lfs; all the others as root.
 
-The scripts have been tested with version 7.3 and current svn. Older versions may break - they haven't been tested.
+The scripts have been tested with version 7.4 and current svn. Older versions may break - they haven't been tested.
 
 chapter08.sh creates a placeholder to build the kernel. You can add your kernel .config file to $LFS/sources at the start and it will build your kernel without your intervention. You have to select this option in the config file when you run lfsa.
 
@@ -35,7 +34,9 @@ been run.
 
 I've given you an option to install everything as root rather than a package user. You might prefer to use a script to do that rather that jhalfs.
 
-You can now install LFS with systemd instead of sysvinit, if you wish. I've tried this a couple of times and it works. Use the systemd version of the chapter07 script, when you get to that.
+You can now install LFS with systemd instead of sysvinit. Select SYSTEMD=yes in the lfsa confi file. Select sources=download and it will include the required systemd source files in the downloaded files. Use the systemd version of the chapter07 script, when you get to that. I tested this with version 7.4 and svn, but earlier versions will probably break.
+
+The updategrub.sh script will update your /boot/grub/grub.cfg file on your host in order to boot into LFS. If this is how you start LFS, edit the script to suit your host (run blkid to see the uuid values for your disks).
 
 The package-user management system uses three main scripts:-
 
