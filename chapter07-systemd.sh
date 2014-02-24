@@ -25,21 +25,10 @@ ff02::2 ip6-allrouters
 # End /etc/hosts
 EOF
 echo "W510" > /etc/hostname
-cat > /etc/sysconfig/clock << "EOF"
-# Begin /etc/sysconfig/clock
-
-UTC=0
-
-# Set this to any options you might need to give to hwclock, 
-# such as machine hardware clock type for Alphas.
-CLOCKPARAMS=
-
-# End /etc/sysconfig/clock
-EOF
 cat > /etc/locale.conf << "EOF"
 # Begin /etc/profile
 
-export LANG=en_US.ISO-8859-1
+export LANG=en_US.UTF-8
 
 # End /etc/profile
 EOF
@@ -89,17 +78,17 @@ EOF
 cat > /etc/fstab << "EOF"
 # Begin /etc/fstab
 
-# file system  mount-point  type   options         dump  fsck
-#                                                        order
+# file system  mount-point   type     options           dump  fsck
+#                                                       order
 /dev/sda8          /         ext4     defaults            1     1
 /dev/sda6          /boot     ext4     defaults            1     2
 /dev/sda7          /home     ext4     defaults            0     0
 /dev/sda9          swap      swap     pri=1               0     0
-proc               /proc     proc     nosuid,noexec,nodev 0     0
-sysfs              /sys      sysfs    nosuid,noexec,nodev 0     0
-devpts             /dev/pts  devpts   gid=5,mode=620      0     0
-tmpfs              /run      tmpfs    defaults            0     0
-devtmpfs           /dev      devtmpfs mode=0755,nosuid    0     0
+#proc               /proc     proc     nosuid,noexec,nodev 0     0
+#sysfs              /sys      sysfs    nosuid,noexec,nodev 0     0
+#devpts             /dev/pts  devpts   gid=5,mode=620      0     0
+#tmpfs              /run      tmpfs    defaults            0     0
+#devtmpfs           /dev      devtmpfs mode=0755,nosuid    0     0
 
 # End /etc/fstab
 EOF
