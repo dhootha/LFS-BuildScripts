@@ -39,8 +39,10 @@ else
   display_menu=true
   cfg=~/LFS.conf
 fi
-DumpedCommands=${LFS}/lfs-commands
-Dumpedhtml=${LFS}/lfs-html
+lfscommands=lfs-commands # the dir containing the lfs-commands
+lfshtml=lfs-html # the dir containing the lfs html
+DumpedCommands=${LFS}/${lfscommands}
+Dumpedhtml=${LFS}/${lfshtml}
 wgetlist="wget-list" # name of the file containing all the source URLs
 wgetopts="" # Options for wget, e.g. proxy settings etc
 RETURN_PARAM=251  # return parameter from a function on error
@@ -63,6 +65,7 @@ LFS_BOOK_LOC_DIR=$HOME/LFS_SVN/$REPO # def local dir for the downloaded book xml
 SVN_URL="svn://svn.linuxfromscratch.org/$REPO/" #svn url
 BOOK_VERSION=$BOOK_VERSION
 SOURCES=$SOURCES
+CLEAN_SRC_DIR=$CLEAN_SRC_DIR
 BOOK=$BOOK
 WHICH_CHAPTER=$WHICH_CHAPTER
 PKGUSERFILE=$PKGUSERFILE
@@ -88,6 +91,9 @@ else
   fi
   if [ -z $SOURCES ]; then
     SOURCES="download"
+  fi
+  if [ -z $CLEAN_SRC_DIR ]; then
+    CLEAN_SRC_DIR="no"
   fi
   if [ -z $WHICH_CHAPTER ]; then
     WHICH_CHAPTER="all"
@@ -115,6 +121,7 @@ else
   echo "SVN_URL=svn://svn.linuxfromscratch.org/$REPO/" | tee -a $cfg
   echo "BOOK_VERSION=$BOOK_VERSION" | tee -a $cfg
   echo "SOURCES=$SOURCES" | tee -a $cfg
+  echo "CLEAN_SRC_DIR=$CLEAN_SRC_DIR" | tee -a $cfg
   echo "BOOK=$BOOK" | tee -a $cfg
   echo "WHICH_CHAPTER=$WHICH_CHAPTER" | tee -a $cfg
   echo "PKGUSERFILE=$PKGUSERFILE" | tee -a $cfg
@@ -160,6 +167,8 @@ _edit () {
      display="Enter chapter05, chapter06 or chapter08. Enter all to build them all. Enter update to update the core lfs packages."
    elif [ "$tochange" = SOURCES ]; then
      display="Either download or local (if local, source files must be in ${SOURCEDIR}/<book_version>)"
+   elif [ "$tochange" = CLEAN_SRC_DIR ]; then
+     display="If yes, all files in $WgetList in ${SOURCEDIR}/<book_version> will be deleted. Default is no"
    elif [ "$tochange" = PKGUSERFILE ]; then
      display="tar file containing the package user build files. Default is pkguser.tar.xz. Place the file in $LFS/sources"
    elif [ "$tochange" = TESTS ]; then
@@ -382,7 +391,7 @@ case $BOOK_VERSION in
          type=tags
          version=$BOOK_VERSION
    ;;
-esac  
+esac
 } #end SetLFSBook
 #
 LastAccessSvn () {
@@ -442,16 +451,14 @@ SVNINFO="$(svn info $REPODIR | awk '{printf $0"|"}')"
 # echo $SVNINFO | awk 'BEGIN{ RS = "|" }; {print $0}'
 # will 'reconstitute it
 SVNrevision=$( echo $SVNINFO | awk 'BEGIN{ RS = "|" };/Revision/ {print $0}' )
-for dir in $DumpedCommands
-do
+for dir in $DumpedCommands; do
   if [ ! -d $dir ]; then
     install -vd $dir
     install -vd $Dumpedhtml
     touch ${dir}/.revision
   fi
 done
-for dir in $DumpedCommands
-do
+for dir in $DumpedCommands; do
   if [ -e "$dir" -a "$SVNrevision" != "$( cat $dir/.revision | awk '/Revision/ {print $0}')" ]; then
     rm -rf $dir
     rm -rf $Dumpedhtml
@@ -459,8 +466,7 @@ do
     install -d $Dumpedhtml
     pushd $REPODIR
             make -j1 DUMPDIR=$DumpedCommands BASEDIR=$Dumpedhtml $target dump-commands
-            for dir in $DumpedCommands $Dumpedhtml
-            do
+            for dir in $DumpedCommands $Dumpedhtml; do
               echo $SVNINFO | awk 'BEGIN{ RS = "|" }; {print $0}' > ${dir}/.revision
             done
     popd
@@ -472,7 +478,6 @@ done
 CleanSourceDir () {
 local srcdir=$1
 local wgetlistFile=$2
-local systemdwgetlistFile=$3
 if [ -d $srcdir ]; then
 # delete any file in $srcdir that is in $wgetlistFile
   if [ -e $wgetlistFile ]; then
@@ -482,17 +487,6 @@ if [ -d $srcdir ]; then
         [ -e ${srcdir}/${fileinlist} ] && rm -rf ${srcdir}/${fileinlist}
       fi
     done < $wgetlistFile
-  fi
-# delete any file in $srcdir that is in $systemdwgetlistFile
-  if [ "$systemdwgetlistFile" != "none" ]; then
-    if [ -e $systemdwgetlistFile ]; then
-      while read systemdFUrl; do
-        if [[ ${systemdFUrl:0:1} != '#' ]]; then # ignore file if it has a hash at the start
-          sysfileinlist=$( echo $systemdFUrl | awk -F\/ '{print $NF}' )
-          [ -e ${srcdir}/${sysfileinlist} ] && rm -rf ${srcdir}/${sysfileinlist}
-        fi
-      done < $systemdwgetlistFile
-    fi
   fi
 else
   rm -rf $srcdir # remove any file called $srcdir - it needs to be a dir
@@ -515,9 +509,7 @@ if [[ "$bookvers" = BOOK || "$bookvers" = "systemd/BOOK" ]]; then # get sources 
     pushd $srcdir
       RequiredFiles=$( md5sum --quiet -c $md5sums 2> /dev/null | awk -F\: '!/OK/{printf "%s ",$1}' )
     popd
-
-    for File in $RequiredFiles
-    do
+    for File in $RequiredFiles; do
       Url=$( grep $File $wgetlistFile )
       case $File in
          lfs-bootscripts*)
@@ -608,7 +600,7 @@ rtrvers=($pkgvers)
 #
 GetLinuxVersion () {
 local srcdir=$1
-wgetFile=$2
+commandloc=$2
 # first find the version of the downloaded kernel source
 linuxfnd=$( ls -l $srcdir | grep ' linux-[0-9]' | awk '{print $NF}' )
 if [ -z $linuxfnd ]; then # linux src not found in wget-list file - return
@@ -616,15 +608,15 @@ if [ -z $linuxfnd ]; then # linux src not found in wget-list file - return
 else
   linuxExt="${linuxfnd#*-}"
   linuxvers="${linuxExt%.tar*}"
-# now find the version of the kernel in the blfs commands
-  while read FileUrl; do
-    if [[ ${FileUrl:0:1} != '#' ]]; then # ignore file if it has a hash at the start
-      linuxcomfnd=$( echo $FileUrl | awk -F\/ '{print $NF}' | grep ^linux-[0-9] )
+# now find the version of the kernel in the lfs commands
+  while read cmdLine; do
+    if [[ ${cmdLine:0:1} != '#' ]]; then # ignore line if it has a hash at the start
+      linuxcomfnd=$( echo $cmdLine | awk -F\/ '{print $NF}' | grep vmlinuz-[0-9] )
       if [ ! -z $linuxcomfnd ]; then break; fi
     fi
-  done < $wgetFile
+  done < ${commandloc}/*-kernel
   linuxcomExt="${linuxcomfnd#*-}"
-  linuxcomvers="${linuxcomExt%.tar*}"
+  linuxcomvers="${linuxcomExt%-lfs*}"
   return 0
 fi
 } # end GetLinuxVersion
@@ -641,8 +633,7 @@ inc=false # switch for whether a configure, make and install section is present
 cont=0 # number of continuation lines
 ifDoc=false # true if an if block containing a doc
 #
-for (( i=0; i<$numb; i++ ))
-do
+for (( i=0; i<$numb; i++ )); do
   case "${buildWrap[i]}" in
     configure_commands*)
       combine[countc++]=${buildWrap[countbl++]}
@@ -719,7 +710,7 @@ do
               countg=$jl
               break
            ;;
-           'cp -v src/msgfmt'*) # gettext ch5
+           'cp -v src/{msgfmt'*) # gettext ch5
               countg=$jl
               break
            ;;
@@ -854,6 +845,16 @@ do
              inc=true
              countg=$[jm+1]
           ;;
+          'cp -v src/{msgfmt'*) # gettext ch5
+             combine[countc++]="  ${commands[jm]}"
+             inc=true
+             countg=$[jm+1]
+          ;;
+          'cp -rv dest/include/* /usr/include'*) # linux-headers copy
+             combine[countc++]="  ${commands[jm]}"
+             inc=true
+             countg=$[jm+1]
+          ;;
           *)
              case "${commands[jm]}" in
                *\\) # if a cont line, then store it
@@ -958,8 +959,8 @@ rtrnCom=""
 getComms $Chapter $PkgName
 ret_val=$?
 if [ "$ret_val" -eq $RETURN_PARAM ]; then # no commands found
-  echo "No commands found for package $PkgName in /lfs-commands"
-  echo "Check you have the correct book written to /lfs-commands"
+  echo "No commands found for package $PkgName in $lfscommands"
+  echo "Check you have the correct book written to $lfscommands"
   echo "Exiting now."
   exit 1
 fi
@@ -969,8 +970,7 @@ numclines=${#commandScripts[@]} # # of commands
 # place commands in output until first configure found
 countg=0
 contline=0
-for line in "${commandScripts[@]}"
-do
+for line in "${commandScripts[@]}"; do
   case "$line" in
        cp*) # expect has a cp with configure in it
          echo "$line"
@@ -1029,90 +1029,89 @@ if [ $countg -lt $((numclines)) ]; then # output remaining commands
   contin=false # switch for a continuation line
   contline=0   # # of continuation lines found
   iftest=false # test for an if block with a /usr/share/doc in it
-  for (( k=$countg; k<$((numclines)); k++ ))
-  do
-      case ${commandScripts[k]} in
-         install*)
-                case ${commandScripts[k]} in
-                   *'/usr/share/doc'*)
-                       case ${commandScripts[k]} in
-                          *\\) # a continuation line
-                             contin=true
-                          ;;
-                       esac
-                   ;;
-                   *\\) # a continuation line
-                       cacheit[contline++]=${commandScripts[k]}
-                       contin=true
-                   ;;
-                   *) # install but not a doc or a cont line
-                       echo ${commandScripts[k]}
-                   ;;
-                esac
-         ;;
-         if*) # starts with if so if a doc, will need to delete the closing fi
-                case ${commandScripts[k]} in
-                   *'/usr/share/doc'*)
-                       iftest=true
-                       case ${commandScripts[k]} in
-                          *\\) # a continuation line
-                             contin=true
-                          ;;
-                       esac
-                   ;;
-                   *\\) # a continuation line
-                       cacheit[contline++]=${commandScripts[k]}
-                       contin=true
-                   ;;
-                   *) # if test but not a doc or a cont line
-                       echo ${commandScripts[k]}
-                   ;;
-                esac
-         ;;
-         ln*) # a symlink so write it - e.g. vim73
-                echo ${commandScripts[k]}
-         ;;
-         *'/usr/share/doc'*)
-                case ${commandScripts[k]} in
-                    *\\) # a continuation line
-                       contin=true
-                    ;;
-                    *)
-                       if $contin; then # is a doc, so don't write
-                         contin=false
-                         contline=0
-                       fi
-                    ;;
-                esac
-         ;;
-         "fi"*)
-                if $iftest; then # end of a doc if test - don't write it
-                  iftest=false
-                else
-                  echo ${commandScripts[k]} # if block is not a doc
-                fi
-         ;;
-         *)
+  for (( k=$countg; k<$((numclines)); k++ )); do
+    case ${commandScripts[k]} in
+       install*)
+              case ${commandScripts[k]} in
+                 *'/usr/share/doc'*)
+                     case ${commandScripts[k]} in
+                        *\\) # a continuation line
+                           contin=true
+                        ;;
+                     esac
+                 ;;
+                 *\\) # a continuation line
+                     cacheit[contline++]=${commandScripts[k]}
+                     contin=true
+                 ;;
+                 *) # install but not a doc or a cont line
+                     echo ${commandScripts[k]}
+                 ;;
+              esac
+       ;;
+       if*) # starts with if so if a doc, will need to delete the closing fi
+              case ${commandScripts[k]} in
+                 *'/usr/share/doc'*)
+                     iftest=true
+                     case ${commandScripts[k]} in
+                        *\\) # a continuation line
+                           contin=true
+                        ;;
+                     esac
+                 ;;
+                 *\\) # a continuation line
+                     cacheit[contline++]=${commandScripts[k]}
+                     contin=true
+                 ;;
+                 *) # if test but not a doc or a cont line
+                     echo ${commandScripts[k]}
+                 ;;
+              esac
+       ;;
+       ln*) # a symlink so write it - e.g. vim73
+              echo ${commandScripts[k]}
+       ;;
+       *'/usr/share/doc'*)
+              case ${commandScripts[k]} in
+                  *\\) # a continuation line
+                     contin=true
+                  ;;
+                  *)
+                     if $contin; then # is a doc, so don't write
+                       contin=false
+                       contline=0
+                     fi
+                  ;;
+              esac
+       ;;
+       "fi"*)
+              if $iftest; then # end of a doc if test - don't write it
+                iftest=false
+              else
+                echo ${commandScripts[k]} # if block is not a doc
+              fi
+       ;;
+       *)
               if ! $iftest; then # commands not within a doc if block
                 case ${commandScripts[k]} in
                     *\\) # continuation line, store it
-                       cacheit[contline++]=${commandScripts[k]}
-                       contin=true
+                         cacheit[contline++]=${commandScripts[k]}
+                         contin=true
                     ;;
                     *)
-                       if [ $contline -gt 0 ]; then # write out continuation line(s)
-                         for (( l=0; l<$contline; l++ )); do
-                           echo "${cacheit[l]}"
-                         done
-                         contin=false
-                         contline=0
-                       fi
-                       echo ${commandScripts[k]}
+                         if [ $contline -gt 0 ]; then # write out continuation lines
+                           for (( l=0; l<$contline; l++ )); do
+                             echo "${cacheit[l]}"
+                           done
+                           contin=false
+                           contline=0
+                         fi
+                         echo ${commandScripts[k]}
                     ;;
                 esac
               fi
-         ;;
-      esac
+       ;;
+    esac
   done
 fi
 return 0
@@ -1142,21 +1141,13 @@ attrcom[6]="rm /usr/lib/libattr.a"
 rtrncommands=(${attrcom[@]})
 } # end attrComms
 #
-expatComms () {
-local expatcom=""
-expatcom[0]="./configure --prefix=/usr"
-expatcom[1]="make"
-expatcom[2]="make install"
-rtrncommands=(${expatcom[@]})
-} # end expatComms
-#
 dbusComms () {
 local dbuscom=""
 dbuscom[0]="./configure --prefix=/usr \\"
 dbuscom[1]="            --sysconfdir=/etc \\"
 dbuscom[2]="            --localstatedir=/var \\"
 dbuscom[3]="            --libexecdir=/usr/lib/dbus-1.0 \\"
-dbuscom[4]="            --with-dbus-user=dbus \\ "
+dbuscom[4]="            --docdir=/usr/share/doc/dbus-1.8.0 \\"
 dbuscom[5]="            --with-system-pid-file=/run/dbus/pid \\"
 dbuscom[6]="            --with-system-socket=/run/dbus/system_bus_socket \\"
 dbuscom[7]="            --disable-static \\"
@@ -1196,38 +1187,40 @@ libcapcom[5]="chmod -v 0755 /usr/lib/libcap.so"
 rtrncommands=(${libcapcom[@]})
 } # end libcapComms
 #
-libdbusComms () {
-local libdbuscom=""
-libdbuscom[0]="./configure --prefix=/usr --disable-static"
-libdbuscom[1]="make -C dbus libdbus-1.la"
-libdbuscom[2]="make -C dbus lib_LTLIBRARIES=libdbus-1.la \\"
-libdbuscom[3]="     install-libLTLIBRARIES \\"
-libdbuscom[4]="     install-dbusincludeHEADERS \\"
-libdbuscom[5]="     install-nodist_dbusarchincludeHEADERS"
-libdbuscom[6]="make install-pkgconfigDATA"
-rtrncommands=(${libdbuscom[@]})
-} # libdbusComms
-#
 systemdComms () {
 local systemdcom=""
-systemdcom[0]="./configure --prefix=/usr \\"
-systemdcom[1]="            --sysconfdir=/etc \\"
-systemdcom[2]="            --localstatedir=/var \\"
-systemdcom[3]="            --libexecdir=/usr/lib \\"
-systemdcom[4]="            --docdir=/usr/share/doc/systemd-204 \\"
-systemdcom[5]="            --with-rootprefix= \\"
-systemdcom[6]="            --with-rootlibdir=/usr/lib \\"
-systemdcom[7]="            --with-firmware-path='/usr/lib/firmware/updates:/usr/lib/firmware' \\"
-systemdcom[8]="            --disable-gudev \\"
-systemdcom[9]="            --without-python"
-systemdcom[10]="make"
-systemdcom[11]="make install"
-systemdcom[12]="for tool in runlevel reboot shutdown poweroff halt telinit; do"
-systemdcom[13]="     ln -sfv ../bin/systemctl /usr/sbin/\$tool"
-systemdcom[14]="done"
-systemdcom[15]="ln -sfv ../lib/systemd/systemd /usr/sbin/init"
-systemdcom[16]="sed -i 's@0775 root lock@0755 root root@g' /usr/lib/tmpfiles.d/legacy.conf"
-systemdcom[17]="systemd-machine-id-setup"
+systemdcom[0]='cat > config.cache << "EOF"'
+systemdcom[1]="KILL=/usr/bin/kill"
+systemdcom[2]="HAVE_BLKID=1"
+systemdcom[3]='BLKID_LIBS="-lblkid"'
+systemdcom[4]='BLKID_CFLAGS="-I/tools/include/blkid"'
+systemdcom[5]="EOF"
+systemdcom[6]='sed -i "s:blkid/::" $(grep -rl "blkid/blkid.h")'
+systemdcom[7]="patch -Np1 -i ../systemd-213-compat-1.patch"
+systemdcom[8]='CFLAGS+=" -fno-lto" ./configure --prefix=/usr                        \'
+systemdcom[9]="            --sysconfdir=/etc                    \\"
+systemdcom[10]="            --localstatedir=/var                 \\"
+systemdcom[11]="            --libexecdir=/usr/lib                \\"
+systemdcom[12]="            --config-cache                       \\"
+systemdcom[13]="            --docdir=/usr/share/doc/systemd-213  \\"
+systemdcom[14]="            --with-rootprefix=                   \\"
+systemdcom[15]="            --with-rootlibdir=/usr/lib           \\"
+systemdcom[16]="            --with-firmware-path='/usr/lib/firmware/updates:/usr/lib/firmware' \\"
+systemdcom[17]="            --disable-gudev                      \\"
+systemdcom[18]="            --without-python                     \\"
+systemdcom[19]="            --with-dbuspolicydir=/etc/dbus-1/system.d               \\"
+systemdcom[20]="            --with-dbusinterfacedir=/usr/share/dbus-1/interfaces    \\"
+systemdcom[21]="            --with-dbussessionservicedir=/usr/share/dbus-1/services \\"
+systemdcom[22]="            --with-dbussystemservicedir=/usr/share/dbus-1/system-services"
+systemdcom[23]="make LIBRARY_PATH=/tools/lib"
+systemdcom[24]="make LIBRARY_PATH=/tools/lib install"
+systemdcom[25]="for tool in runlevel reboot shutdown poweroff halt telinit; do"
+systemdcom[26]="     ln -sfv ../bin/systemctl /usr/bin/\$tool"
+systemdcom[27]="done"
+systemdcom[28]="ln -sfv ../lib/systemd/systemd /usr/sbin/init"
+systemdcom[29]='sed -i "s@0775 root lock@0755 root root@g" /usr/lib/tmpfiles.d/legacy.conf'
+systemdcom[30]="systemd-machine-id-setup"
+systemdcom[31]="rm -rfv /usr/lib/rpm"
 rtrncommands=(${systemdcom[@]})
 } # end systemdComms
 #
@@ -1265,8 +1258,7 @@ else
   numclines=${#commandScripts[@]}
   countg=0 # initialize commands counter
   cont=0
-  for line in "${commandScripts[@]}"
-  do
+  for line in "${commandScripts[@]}"; do
     case "$line" in
        sed*)
 # test if sed has continuation line
@@ -1317,14 +1309,12 @@ else
   rtr=""
   combineScripts commandScripts[@] buildScripts[@]
   scriptOut=(${rtr[@]})
-  for t in "${scriptOut[@]}"
-  do
+  for t in "${scriptOut[@]}"; do
     echo $t
   done
   if [ $countg -lt $numclines ]; then # output remaining commands
     contin=false
-    for (( k=$countg; k<$numclines; k++ ))
-    do
+    for (( k=$countg; k<$numclines; k++ )); do
       if [[ "${commandScripts[k]}" == install* ]]; then #don't install docs
         case ${commandScripts[k]} in
             *\\) # continuation line
@@ -1428,6 +1418,9 @@ EOF
 } # end cleanPkgDir
 #
 unpackpkguser () {
+#
+# $1 is the pkguser filename
+local pkguserFile=$1
 pkgFileName="${pkguserFile%.tar*}"
 if [ ! -e ${LFS}${sourcedir}/${pkguserFile} ]; then
   if [ -d ${LFS}/tools/${pkgFileName} ]; then
@@ -1504,6 +1497,13 @@ chmod 664 $BuildLog
 # set some initial dirs to install and sticky
 chown 0:9999 $(cat ${pkguserdir}/installdirs.lst)
 chmod ug=rwx,o=rxt $(cat ${pkguserdir}/installdirs.lst)
+EOF
+# if using sysvinit for init then build uses /usr/libexec
+if [ "$SYSTEMD" = no ]; then
+  echo "chgrp install /usr/libexec
+chmod 1775 /usr/libexec" >> $Output
+fi
+cat >> $Output << "EOF"
 #
 cat >> /etc/pkgusr/bash_profile << "BashProfile"
 #
@@ -1627,22 +1627,12 @@ EOF
                    ;;
                    *)
                       echo "PkgName=$PkgName" >> $Output
-                      if [ "$FuncName" = libdbus ]; then # test for .libdbus
-                        echo "FuncName=$FuncName" >> $Output
-                        cat >> $Output << "EOF"
-if [ -e "$PkgUserDir/$PkgName/.$FuncName" ]; then
-  echo "skipping $FuncName"
-  return
-fi
-EOF
-                      else
-                        cat >> $Output << "EOF"
+                      cat >> $Output << "EOF"
 if [ -e "$PkgUserDir/$PkgName/.$PkgName" ]; then
   echo "skipping $PkgName"
   return
 fi
 EOF
-                      fi
                       if ! $as_root; then
                         cat >> $Output << "EOF"
 install -v -m0755 -d ${PkgUserDir}/${PkgName}
@@ -1655,9 +1645,6 @@ CUR_DIR=$HOME
 EOF
                         echo "SrcName=$SrcName
 sourceloc=$sourceloc" >> $Output
-                        if [ "$FuncName" = libdbus ]; then # need the FuncName in the build file
-                          echo "FuncName=$FuncName" >> $Output
-                        fi
                         if [ "$Chapter" = chapter08 ];then echo "sourcedir=$sourcedir" >> $Output; fi
                       else # building as root
                         cat >> $Output << "EOF"
@@ -1800,38 +1787,19 @@ echo "${FuncName}" >> $BuildLog
 EOF
            ;;
            *)
-            case $FuncName in
-               libdbus)
-                 if ! $as_root; then
-                   cat >> $Output << "EOF"
-touch ~/.${FuncName} # pkgname is dbus but funcname is libdbus
-endtime=$( date +%s )
-set +e
-EOF
-                 else
-                    cat >> $Output << "EOF"
-touch ${PkgUserDir}/${PkgName}/.${FuncName}
-endtime=$( date +%s )
-set +e
-EOF
-                 fi                 
-               ;;
-               *)
-                 if ! $as_root; then
-                   cat >> $Output << "EOF"
+             if ! $as_root; then
+               cat >> $Output << "EOF"
 touch ~/.${PkgName}
 endtime=$( date +%s )
 set +e
 EOF
-                 else
-                    cat >> $Output << "EOF"
+             else
+                cat >> $Output << "EOF"
 touch ${PkgUserDir}/${PkgName}/.${PkgName}
 endtime=$( date +%s )
 set +e
 EOF
-                 fi
-               ;;
-            esac
+             fi
 delSrcFile >> $Output
 if [ "$PkgName" = glibc ]; then #also delete glibc-build
   echo "rm -rf glibc-build" >> $Output
@@ -1863,22 +1831,11 @@ EOF
            fi
            cat >> $Output << "EOF"
 su $PkgName
-EOF
-           if [ "$FuncName" = libdbus ]; then # test for .libdbus in dbus dir
-             cat >> $Output << "EOF"
-if [ ! -e $PkgUserDir/$PkgName/.$FuncName ]; then
-  echo "${PkgName} failed"
-  exit 1
-fi
-EOF
-           else
-             cat >> $Output << "EOF"
 if [ ! -e $PkgUserDir/$PkgName/.$PkgName ]; then
   echo "${PkgName} failed"
   exit 1
 fi
 EOF
-           fi
 echo "chown \$PkgName:\$PkgName \${PkgUserDir}/\${PkgName}/$build" >> $Output
            if [ "$Chapters" != update ]; then
              cat >> $Output << "EOF"
@@ -1905,6 +1862,18 @@ chown root:install /usr/share/info/dir
 chmod 664 /usr/share/info/dir
 chgrp install /usr/include/sys # for libcap
 chmod g+w,o+t /usr/include/sys
+chgrp install /usr/lib/systemd
+chmod g+w,o+t /usr/lib/systemd
+chgrp install /usr/lib/systemd/system
+chmod g+w,o+t /usr/lib/systemd/system
+chgrp install /usr/lib/tmpfiles.d
+chmod g+w,o+t /usr/lib/tmpfiles.d
+EOF
+             ;;
+             kmod)
+               cat >> $Output << "EOF"
+chgrp install /usr/share/bash-completion/completions
+chmod g+w,o+t /usr/share/bash-completion/completions
 EOF
              ;;
              pkg-config) #/usr/share/aclocal
@@ -1938,15 +1907,17 @@ chown root:tty /usr/bin/wall
 chmod 2755 /usr/bin/wall
 chgrp install /usr/share/bash-completion/completions
 chmod g+w,o+t /usr/share/bash-completion/completions
-if [ -e /usr/lib/systemd ]; then
-  chgrp install /usr/lib/systemd # if dbus installed
-  chmod g+w,o+t /usr/lib/systemd
-  chgrp install /usr/lib/systemd/system
-  chmod g+w,o+t /usr/lib/systemd/system
-  chgrp install /usr/share/bash-completion/completions
-  chmod g+w,o+t /usr/share/bash-completion/completions
-fi
 EOF
+if [ "$SYSTEMD" = yes ]; then
+                 cat >> $Output << "EOF"
+chgrp install /usr/lib/systemd # if dbus installed
+chmod g+w,o+t /usr/lib/systemd
+chgrp install /usr/lib/systemd/system
+chmod g+w,o+t /usr/lib/systemd/system
+chgrp install /usr/share/bash-completion/completions
+chmod g+w,o+t /usr/share/bash-completion/completions
+EOF
+fi
 if [ "$Chapters" = update ]; then
   cat >> $Output << "EOF"
 chown root /usr/bin/su
@@ -1958,9 +1929,16 @@ fi
                cat >> $Output << "EOF"
 pwconv
 grpconv
-chown root /usr/bin/{passwd,su}
-chmod 4755 /usr/bin/{passwd,su}
+chown root /usr/bin/su
+chmod 4755 /usr/bin/su
 EOF
+if [ "$SYSTEMD" = yes ]; then
+  echo "chown root /usr/bin/passwd
+chmod 4755 /usr/bin/passwd" >> $Output
+else
+  echo "chown root /bin/passwd
+chmod 4755 /bin/passwd" >> $Output
+fi
              ;;
              bash) #/usr/share/aclocal
                cat >> $Output << "EOF"
@@ -2024,7 +2002,7 @@ chgrp install /etc/bash_completion.d
 chmod g+w,o+t /etc/bash_completion.d
 EOF
              ;;
-             udev)
+             eudev)
                cat >> $Output << "EOF"
 chgrp install /lib/udev/rules.d
 chmod g+w,o+t /lib/udev/rules.d
@@ -2057,13 +2035,13 @@ chmod g+w,o+t /usr/lib/systemd/system/sockets.target.wants
 chgrp install /usr/lib/systemd/system/multi-user.target.wants
 chmod g+w,o+t /usr/lib/systemd/system/multi-user.target.wants
 # systemd-detect-virt-install-hook
-chgrp systemd-journal /var/log/journal
 /usr/sbin/setcap cap_dac_override,cap_sys_ptrace=ep /usr/bin/systemd-detect-virt
+chown root:systemd-journal /var/log/journal
+chmod 2755 /var/log/journal
 EOF
              ;;
              dbus)
-               if [ "$FuncName" = dbus ]; then # only do this for dbus, not libdbus
-                 cat >> $Output << "EOF"
+               cat >> $Output << "EOF"
 chown root /usr/lib/dbus-1.0/dbus-daemon-launch-helper
 chmod 4750 /usr/lib/dbus-1.0/dbus-daemon-launch-helper
 chgrp install /usr/lib/dbus-1.0
@@ -2087,7 +2065,6 @@ chmod g+w,o+t /usr/lib/systemd/system/sockets.target.wants
 chgrp install /usr/lib/systemd/system/multi-user.target.wants
 chmod g+w,o+t /usr/lib/systemd/system/multi-user.target.wants
 EOF
-               fi
              ;;
              vim) # man pages
                cat >> $Output << "EOF"
@@ -2149,7 +2126,7 @@ rm ${PkgUserDir}/{coreutils/{.coreutils,build},systemd/build,shadow/{.shadow,bui
 EOF
            else
              cat >> $Output << "EOF"
-rm ${PkgUserDir}/{coreutils/{.coreutils,build},udev/build,shadow/{.shadow,build}} # in prep for blfs
+rm ${PkgUserDir}/{coreutils/{.coreutils,build},eudev/build,shadow/{.shadow,build}} # in prep for blfs
 EOF
            fi
          fi
@@ -2168,7 +2145,7 @@ rm ${PkgUserDir}/{coreutils/.coreutils,shadow/.shadow} # in prep for blfs
 EOF
          else
            cat >> $Output << "EOF"
-rm ${PkgUserDir}/{coreutils/.coreutils,udev/.udev,shadow/.shadow} # in prep for blfs
+rm ${PkgUserDir}/{coreutils/.coreutils,eudev/.eudev,shadow/.shadow} # in prep for blfs
 EOF
          fi
       fi # end as_root test
@@ -2179,8 +2156,7 @@ EOF
         rtrnCom=""
         CmdName=kernel
         getComms $Chapter $PkgName
-        for line in ${rtrnCom[@]}
-        do
+        for line in ${rtrnCom[@]}; do
           case $line in
              "cp -v"*) # cp the bzImage, System.map and the .config file
                     line=${line#"cp -v "}
@@ -2198,8 +2174,7 @@ EOF
           rtrnCom=""
           CmdName=theend
           getComms "chapter09" $PkgName
-          for line in ${rtrnCom[@]}
-          do
+          for line in ${rtrnCom[@]}; do
             case $line in
               DISTRIB_CODENAME*)
                 echo $line | sed -e 's@<your name here>@John@' \
@@ -2231,20 +2206,15 @@ case $PkgName in
         doFirst=""
         links="/bin/{cat,echo,false,pwd,stty} /etc/group"
     ;;
-    dbus)
-        if ! $as_root; then
-          doFirst="/usr/bin/delpkg libdbus"
-          links=""
-        fi
-    ;;
     inetutils)
         doFirst=""
         links="/usr/bin/{dnsdomainname,ping,ping6,traceroute,rcp,rlogin,rsh} /usr/share/man/man1/dnsdomainname.1"
     ;;
     kernel) # install any firmware for the kernel
+        doFirst=""
+        links=""
         if [ "$Chapters" != update ]; then
           doFirst="mkdir -pv /usr/lib/firmware && cp /tools/pkguser/firmware/iwlwifi-6000-4.ucode /usr/lib/firmware && chgrp install /usr/lib/firmware && chmod 1775 /usr/lib/firmware"
-          links=""
         fi
     ;;
     ncurses)
@@ -2264,16 +2234,19 @@ case $PkgName in
         links="/usr/share/man/man8/sysklogd.8"
     ;;
     systemd)
-        doFirst="groupadd -g 190 systemd-journal"
+        doFirst="if [ \"\$(grep -q ^systemd-journal\: /etc/group;echo \$?)\" != 0 ]; then
+  groupadd -g 190 systemd-journal
+fi"
         links=""
     ;;
-    udev)
+    eudev)
         doFirst=""
         links="/lib/{firmware,udev,udev/devices,udev/devices/pts}"
     ;;
     util-linux)
+        doFirst=""
+        links=""
         if [ "$Chapters" = update ]; then
-          doFirst=""
           links="/usr/bin/{mount,su,umount,wall} /usr/share/man/man1/su.1"
         fi
     ;;
@@ -2356,15 +2329,12 @@ starttime=$( date +%s )
 }
 EOF
     ;;
-    udev)
+    eudev)
     cat << "EOF"
 unpack () {
 starttime=$( date +%s )
 cp ${sourceloc}/${SrcName}*.* .
-if [ -e ${sourceloc}/udev-lfs*.tar.*z* ]; then
-  cp ${sourceloc}/udev-lfs*.tar.*z* .
-fi
-cd $(tar vxf ${SrcName}*z* | awk -F\/ 'END{print $1}')
+cd $(tar vxf ${SrcName}[0-9].[0-9].tar.*z* | awk -F\/ 'END{print $1}')
 endtime=$( date +%s )
 set +e
 unpacktime=$( expr $endtime - $starttime )
@@ -2452,6 +2422,11 @@ case $PkgName in
               -e "/make install/i\  sed -i '/\\\\\$(INSTALL) -m 755 -d \\\\\$(MAN_DEST)/d' man\/man5\/Makefile" \
         >> $Output
     ;;
+    automake)
+        GetCommands \
+        | sed -e '/sed -i/,/make -j4 check/d' \
+        >> $Output
+    ;;
     bash)
         GetCommands \
         | sed -e '/nobody/d' \
@@ -2477,17 +2452,24 @@ else
     ;;
     bzip2) # ch6 only
         if [ "$Chapters" != update ]; then
-          GetCommands \
-           | sed -e "/patch/i sed -e 's\/^CFLAGS=\\\(.\*\\\)\$\/CFLAGS=\\\1 \\\\\$(BIGFILES)\/' -i ./Makefile-libbz2_so" \
-                 -e '/make PREFIX=\/usr/i\  make bzip2 bzip2recover' \
-                 -e 's/cp -v bzip2-shared \/bin\/bzip2/cp -v bzip2-shared \/usr\/bin\/bzip2/' \
-                 -e 's/cp -av libbz2.so\* \/lib/cp -av libbz2.so\* \/usr\/lib/' \
-                 -e '/ln -sv ..\/..\/lib/d' \
-                 -e '/rm -v/i ln -sv libbz2.so.1.0 /usr/lib/libbz2.so' \
-                 -e 's/bunzip2,bzcat,bzip2/bunzip2,bzcat/' \
-                 -e 's/\/bin\/bunzip2/\/usr\/bin\/bunzip2/' \
-                 -e 's/\/bin\/bzcat/\/usr\/bin\/bzcat/' \
-           >> $Output
+          if [ "$SYSTEMD" = yes ]; then
+            GetCommands \
+             | sed -e "/patch/i sed -e 's\/^CFLAGS=\\\(.\*\\\)\$\/CFLAGS=\\\1 \\\\\$(BIGFILES)\/' -i ./Makefile-libbz2_so" \
+                   -e '/make PREFIX=\/usr/i\  make bzip2 bzip2recover' \
+                   -e 's/cp -v bzip2-shared \/bin\/bzip2/cp -v bzip2-shared \/usr\/bin\/bzip2/' \
+                   -e 's/cp -av libbz2.so\* \/lib/cp -av libbz2.so\* \/usr\/lib/' \
+                   -e '/ln -sv ..\/..\/lib/d' \
+                   -e '/rm -v/i ln -sv libbz2.so.1.0 /usr/lib/libbz2.so' \
+                   -e 's/bunzip2,bzcat,bzip2/bunzip2,bzcat/' \
+                   -e 's/\/bin\/bunzip2/\/usr\/bin\/bunzip2/' \
+                   -e 's/\/bin\/bzcat/\/usr\/bin\/bzcat/' \
+             >> $Output
+          else
+            GetCommands \
+             | sed -e "/patch/i sed -e 's\/^CFLAGS=\\\(.\*\\\)\$\/CFLAGS=\\\1 \\\\\$(BIGFILES)\/' -i ./Makefile-libbz2_so" \
+                   -e '/make PREFIX=\/usr/i\  make bzip2 bzip2recover' \
+             >> $Output
+          fi
         else
           GetCommands \
            | sed -e "/patch/i sed -e 's\/^CFLAGS=\\\(.\*\\\)\$\/CFLAGS=\\\1 \\\\\$(BIGFILES)\/' -i ./Makefile-libbz2_so" \
@@ -2507,7 +2489,8 @@ else
     coreutils)
         if [ "$SYSTEMD" = yes ]; then
           GetCommands \
-           | sed -e "/make NON_ROOT_USERNAME=nobody/,/sed -i '\/dummy\/d' \/etc\/group/d" \
+           | sed -e 's/uptime/uptime \\\n\              --libexecdir=\/usr\/lib/' \
+                 -e "/make NON_ROOT_USERNAME=nobody/,/sed -i '\/dummy\/d' \/etc\/group/d" \
                  -e '/mv -v \/usr\/bin\/{cat/,/mv -v \/usr\/bin\/chroot/d' \
                  -e '/mv -v \/usr\/bin\/{head/d' \
            >> $Output
@@ -2544,9 +2527,9 @@ else
         fi
     ;;
     dbus)
-        GetInternalCommands dbusComms \
-         | sed -e 's/\/usr\/share\/doc\/dbus-1.8.0/\/usr\/share\/doc\/dbus-'"${dbusvers}"'/' \
-         >> $Output
+          GetInternalCommands dbusComms \
+           | sed -e 's/\/usr\/share\/doc\/dbus-1.8.0/\/usr\/share\/doc\/dbus-'"${dbusvers}"'/' \
+           >> $Output
     ;;
     e2fsprogs)
         GetCommands \
@@ -2554,13 +2537,11 @@ else
                -e 's/cd build/cd e2fsprogs-build/' \
          >> $Output
     ;;
-    expat)
-        GetInternalCommands expatComms >> $Output
-    ;;
     findutils)
         if [ "$SYSTEMD" = yes ]; then
           GetCommands \
-           | sed -e '/mv -v/,/sed -i/d' \
+           | sed -e 's/locate/locate --libexecdir=\/usr\/lib\/findutils/' \
+                 -e '/mv -v/,/sed -i/d' \
            >> $Output
         else
           GetCommands >> $Output
@@ -2569,24 +2550,48 @@ else
     flex)
         if [ "$Chapters" = update ]; then # don't re-create /usr/bin/lex
           GetCommands \
-           | sed -e '/ln -sv libfl.a/,/chmod -v 755/d' \
+           | sed -e '/ln -s flex/d' \
            >> $Output
+        else
+          GetCommands >> $Output
         fi
+    ;;
+    gawk)
+        if [ "$SYSTEMD" = yes ]; then
+          GetCommands \
+           | sed -e 's/prefix=\/usr/prefix=\/usr --libexecdir=\/usr\/lib/' \
+           >> $Output
+        else
+          GetCommands >> $Output
+        fi 
     ;;
     gcc)
         if [ "$Chapters" != update ]; then
-          GetCommands \
-           | sed -e "/ln -sv gcc/ a set +e" \
-           | awk '{if ($1 == "mkdir" && $2 =="-v")
+          if [ "$SYSTEMD" = yes ]; then
+            GetCommands \
+             | sed -e 's/with-system-zlib/with-system-zlib          \\\n\       --libexecdir=\/usr\/lib/' \
+                   -e "/ln -sv gcc/ a set +e" \
+             | awk '{if ($1 == "mkdir" && $2 =="-v")
 print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
 else
 print $0;
 }' \
-           >> $Output
-           echo "set -e" >> $Output
-        else
+             >> $Output
+          else
+            GetCommands \
+             | sed -e "/ln -sv gcc/ a set +e" \
+             | awk '{if ($1 == "mkdir" && $2 =="-v")
+print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
+else
+print $0;
+}' \
+             >> $Output
+          fi
+          echo "set -e" >> $Output
+        else # update
           GetCommands \
-           | sed -e "/ln -sv gcc/ a set +e" \
+           | sed -e 's/with-system-zlib/with-system-zlib          \\\n\              --libexecdir=\/usr\/lib/' \
+                 -e "/ln -sv gcc/ a set +e" \
                  -e '/ln -sv/d' \
            | awk '{if ($1 == "mkdir" && $2 =="-v")
 print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
@@ -2597,20 +2602,13 @@ print $0;
            echo "set -e" >> $Output
         fi
     ;;
-    gettext) # ch5 - add msgmerge and xgetext; ch6 - update with current version
-        GetCommands \
-         | sed -e '/--docdir=\/usr\/share\/doc\/gettext/d' \
-               -e "/configure --prefix=\/usr/a\              --docdir=\/usr\/share\/doc\/gettext-${gettextvers}" \
-               -e '/make -C src msgfmt/a\  make -C src msgmerge\n  make -C src xgettext' \
-               -e 's/cp -v src\/msgfmt/cp -v src\/{msgfmt,msgmerge,xgettext}/' \
-         >> $Output
-    ;;
     glibc)
         if [ "$Chapters" != update ]; then
           # set up glibc's timezone
           # + fix the builddir issue
           GetCommands \
-           | sed -e '/tzselect/d' \
+           | sed -e 's/obsolete-rpc/obsolete-rpc  \\\n\      --libexecdir=\/usr\/lib/' \
+                 -e '/tzselect/d' \
                  -e 's/zic/\/usr\/sbin\/zic/' \
                  -e 's[\*\*EDITME<xxx>EDITME\*\*['$TZ'[' \
            | awk '{if ($1 == "mkdir" && $2 =="-v")
@@ -2626,7 +2624,8 @@ print $0
            >> $Output
         else # update so don't need most of the commands
           GetCommands \
-           | sed -e '/touch \/etc\/ld.so.conf/d' \
+           | sed -e 's/obsolete-rpc/obsolete-rpc  \\\n\    --libexecdir=\/usr\/lib/' \
+                 -e '/touch \/etc\/ld.so.conf/d' \
                  -e '/mkdir -pv \/usr\/lib\/locale/,/mkdir -pv \/etc\/ld.so.conf.d/d' \
            | awk '{if ($1 == "mkdir" && $2 =="-v")
 print "if [ ! -e "$NF" ]; then\n  "$0"\nfi\n";
@@ -2665,6 +2664,7 @@ print $0
         else
           GetCommands \
            | sed -e 's/\*\*EDITME<paper_size>EDITME\*\*/'$PAPER_SIZE'/' \
+                 -e '/End of editable block/d' \
            >> $Output
         fi
     ;;
@@ -2682,16 +2682,18 @@ print $0
         if [ "$SYSTEMD" = yes ]; then
           if [ "$Chapters" != update ]; then
             GetCommands \
-             | sed -e '/mv -v/d' \
+             | sed -e '/disable-logger/i\     --libexecdir=/usr/lib  \\' \
+                   -e '/mv -v/d' \
              >> $Output
           else
             GetCommands \
-             | sed -e 's/disable-servers/disable-servers \\\n              --disable-hostname \\\n              --disable-ifconfig/' \
+             | sed -e '/disable-logger/i\     --libexecdir=/usr/lib  \\' \
+                   -e 's/disable-servers/disable-servers \\\n              --disable-hostname \\\n              --disable-ifconfig/' \
                    -e '/mv -v/d' \
              >> $Output
           fi
         else
-          GetCommands >> $Output
+          GetCommands  >> $Output
         fi
     ;;
     intltool)
@@ -2717,7 +2719,7 @@ print $0
     ;;
     kernfs) # add changingowner as the first command
         GetCommands \
-         | sed -e '/mkdir -pv \$LFS\/{dev,proc,sys}/i chown -R root:root $LFS/tools' \
+         | sed -e '/mkdir -pv \$LFS\/{dev,proc,sys/i chown -R root:root $LFS/tools' \
          >> $Output
     ;;
     kmod)
@@ -2743,8 +2745,14 @@ print $0
     libcap)
         GetInternalCommands libcapComms  >> $Output
     ;;
-    libdbus)
-        GetInternalCommands libdbusComms  >> $Output
+    man-db)
+        if [ "$SYSTEMD" = yes ]; then
+          GetCommands \
+           | sed -e 's/bin\/grap/bin\/grap --libexecdir=\/usr\/lib/' \
+           >> $Output
+        else
+          GetCommands >> $Output
+        fi
     ;;
     ncurses)
         if [ "$SYSTEMD" = yes ]; then
@@ -2810,17 +2818,28 @@ print $0
         # setup shadow pssswd files
         # delete pwconv and grpconv because cannot lock /etc/passwd
         # do pwconv and grpconv later as root
-        GetCommands \
-         | sed -e "/sed -i 's@DICTPATH.*@DICTPATH\\\t\/lib\/cracklib\/pw_dict@' \\\\/d" \
-               -e '0,/etc\/login.defs/! s/etc\/login.defs//' \
-               -e "/configure_commands()/i sed -i -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr \\\\\\\//' \\\\\n -e 's\/zh_CN zh_TW\/\/' \\\\\n -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr\//'  man/Makefile.in" \
-               -e '/mv -v/d' \
-               -e '/passwd root/d' \
-               -e '/pwconv/ i touch /etc/shadow\nchmod 640 /etc/shadow' \
-               -e '/grpconv/ i touch /etc/gshadow\nchmod 640 /etc/gshadow' \
-               -e '/pwconv/d' \
-               -e '/grpconv/d' \
-         >> $Output
+        if [ "$SYSTEMD" = yes ]; then
+          GetCommands \
+           | sed -e '/DICTPATH/d' \
+                 -e "/configure_commands()/i sed -i -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr \\\\\\\//' \\\\\n\       -e 's\/zh_CN zh_TW\/\/' \\\\\n\       -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr\//'  man/Makefile.in" \
+                 -e '/mv -v/d' \
+                 -e '/passwd root/d' \
+                 -e '/pwconv/ i touch /etc/shadow\nchmod 640 /etc/shadow' \
+                 -e '/grpconv/ i touch /etc/gshadow\nchmod 640 /etc/gshadow' \
+                 -e '/pwconv/d' \
+                 -e '/grpconv/d' \
+           >> $Output
+        else
+          GetCommands \
+           | sed -e '/DICTPATH/d' \
+                 -e "/configure_commands()/i sed -i -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr \\\\\\\//' \\\\\n\       -e 's\/zh_CN zh_TW\/\/' \\\\\n\       -e 's\/po cs da de es fi fr hu id it ja ko pl pt_BR ru sv tr\//'  man/Makefile.in" \
+                 -e '/passwd root/d' \
+                 -e '/pwconv/ i touch /etc/shadow\nchmod 640 /etc/shadow' \
+                 -e '/grpconv/ i touch /etc/gshadow\nchmod 640 /etc/gshadow' \
+                 -e '/pwconv/d' \
+                 -e '/grpconv/d' \
+           >> $Output
+        fi
     ;;
     stripping)
         # strip always exits with 1, so toggle bash's -e flag
@@ -2855,16 +2874,19 @@ EOF
         fi
     ;;
     sysklogd)
-       # fix the Make file to use the install wrapper and not the default install bin
-        GetCommands \
-         | awk '{if ($NF == "install" && $1 == "make") $1 = "  make INSTALL=install"; print $0}' \
-         >> $Output
+        if ! $as_root; then
+        # fix the Make file to use the install wrapper and not the default install bin
+          GetCommands \
+           | awk '{if ($NF == "install" && $1 == "make") $1 = "  make INSTALL=install"; print $0}' \
+           >> $Output
+        else
+          GetCommands >> $Output
+        fi
     ;;
     systemd) # update the version in the configure section
-        GetInternalCommands systemdComms \
-         | sed -e 's/\/usr\/share\/doc\/systemd-204/\/usr\/share\/doc\/systemd-'"${systemdvers}"'/' \
-               -e '/--with-firmware-path/i\              --with-dbuspolicydir=/etc/dbus-1/system.d \\' \
-         >> $Output
+          GetInternalCommands systemdComms \
+           | sed -e 's/\/usr\/share\/doc\/systemd-212/\/usr\/share\/doc\/systemd-'"${systemdvers}"'/' \
+           >> $Output
     ;;
     sysvinit)
         if [ "$SYSTEMD" = yes ]; then
@@ -2876,7 +2898,7 @@ EOF
     tar)
         if [ "$SYSTEMD" = yes ]; then
           GetCommands \
-           | sed -e 's/--bindir=\/bin/--bindir=\/usr\/bin/' \
+           | sed -e 's/bindir=\/bin/bindir=\/usr\/bin --libexecdir=\/usr\/lib\/tar/' \
            >> $Output
         else
           GetCommands >> $Output
@@ -2898,10 +2920,8 @@ EOF
           else
             GetCommands >> $Output
           fi
-        else # chapter 5 added util-linux
-          GetCommands \
-             | sed -e 's/chown/chown --without-systemdsystemunitdir/' \
-             >> $Output
+        else # ch5
+            GetCommands >> $Output
         fi
     ;;
     vim)
@@ -2969,7 +2989,6 @@ done
 } #end cleanstart
 
 Start () {
-systemdfound=false # if using sysvinit, udev is installed from systemd source file
 cleanstart $WHICH_CHAPTER
 local bookdir=$1
 local book_version=$2
@@ -2999,239 +3018,164 @@ for Chapters in $reqChaps; do
        ;;
     esac
   Header # set the header values
-  for Name in $( awk -F\" '/href/ && !/<!--/ {gsub(/\.xml/,"");print $(NF -1)}' ${REPODIR}/${Chapter}/${Chapter}.xml )
-  do
-    if [ "$Name" = systemd ]; then
-      if [ "$SYSTEMD" = no ]; then
-        systemdfound=true
-        Name="udev"  # systemd not installed in standard lfs
+  for Name in $( awk -F\" '/href/ && !/<!--/ {gsub(/\.xml/,"");print $(NF -1)}' ${REPODIR}/${Chapter}/${Chapter}.xml ); do
+    if [[ "$BOOK_VERSION" == BOOK && ("$Name" == systemd || "$Name" == dbus) ]]; then # these are no longer in BOOK
+      :
+    else
+      if [ "$Name" = eudev ]; then
+        if [ "$SYSTEMD" = yes ]; then Name="systemd"; fi # systemd installed in place of eudev
       fi
-    fi
-    FuncName=$( echo $Name | sed -e s/-//g ) # no - allowed in bash names
-    PkgName=$( echo $Name | sed -e s/pass.$// -e s/-$// )
-    SrcName=$PkgName-
-    if $systemdfound; then
-      SrcName=systemd-
-      systemdfound=false
-    fi
-    CmdName=$Name
+      FuncName=$( echo $Name | sed -e s/-//g ) # no - allowed in bash names
+      PkgName=$( echo $Name | sed -e s/pass.$// -e s/-$// )
+      SrcName=$PkgName-
+      CmdName=$Name
 # Output file is changed in chapter06, so need to reset it
-    case $Chapters in
-       chapter05)
-          Output=${LFS}/${ch5script}
-          Chapter=chapter05
-       ;;
-       chapter06)
-          Output=${LFS}/${ch6script}
-          Chapter=chapter06
-       ;;
-       chapter08)
-          Output=${LFS}/${ch8script}
-          Chapter=chapter08
-       ;;
-       update)
-          Output=${LFS}/${updateScript}
-          Chapter=chapter06
-       ;;
-    esac
-    case $PkgName in
-      changingowner)
-          : # can't deal with this in chapter05
-      ;;
-      chroot)
-          if [ "$Chapters" != update ]; then
-            Output=$LFS/${ch6chroot}
+      case $Chapters in
+         chapter05)
+            Output=${LFS}/${ch5script}
+            Chapter=chapter05
+         ;;
+         chapter06)
+            Output=${LFS}/${ch6script}
+            Chapter=chapter06
+         ;;
+         chapter08)
+            Output=${LFS}/${ch8script}
+            Chapter=chapter08
+         ;;
+         update)
+            Output=${LFS}/${updateScript}
+            Chapter=chapter06
+         ;;
+      esac
+      case $PkgName in
+        changingowner)
+            : # can't deal with this in chapter05
+        ;;
+        chroot)
+            if [ "$Chapters" != update ]; then
+              Output=$LFS/${ch6chroot}
 # if you log out or reboot you need to mount the kernelfs again
 # so include some conditionals to look after this
-            cat $LFS/${ch6asroot} \
-            | awk '/mount -v/ { printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
-            >> $Output
-            Function
-          fi
-      ;;
-      createfiles)
-          if [ "$Chapters" != update ]; then
-            Function
-            # Now have a base file structure so add pkguser
-            if ! $as_root; then
-              pkguser
-            else
-              copypkguserbin # add listpkg and necessary files
+              cat $LFS/${ch6asroot} \
+              | awk '/mount -v/ { printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
+              >> $Output
+              Function
             fi
-          fi
-      ;;
-      creatingdirs)
-          if [ "$Chapters" != update ]; then
+        ;;
+        createfiles)
+            if [ "$Chapters" != update ]; then
+              Function
+            # Now have a base file structure so add pkguser
+              if ! $as_root; then
+                pkguser
+              else
+                copypkguserbin # add listpkg and necessary files
+              fi
+            fi
+        ;;
+        creatingdirs)
+            if [ "$Chapters" != update ]; then
+              Function
+            else
+              cleanPkgDir
+              update_pkguser # add some files to the tools dir
+            fi
+        ;;
+        expect)
+            SrcName=expect5
             Function
-          else
-            cleanPkgDir
-            update_pkguser # add some files to the tools dir
-          fi
-      ;;
-      expect)
-          SrcName=expect5
-          Function
-      ;;
-      fstab) # can't deal with this here - chapter7
-          :
-      ;;
-      gdbm)
-          Function
-          if [[ "$SYSTEMD" == yes && "$Chapter" == chapter06 ]]; then
-# add expat after gdbm
-            for sysFile in expat
-            do
-              FuncName=$sysFile
-              PkgName=$sysFile
-              SrcName=${PkgName}-
+        ;;
+        fstab) # can't deal with this here - chapter7
+            :
+        ;;
+        introduction|toolchaintechnotes|generalinstructions|pkgmgt|aboutdebug)
+            : # don't need any of these
+        ;;
+        kernfs)
+            if [ "$Chapters" != update ]; then
+              Output=$LFS/${ch6asroot}
               Function
-            done
-          fi
-      ;;
-      gettext)
-          Function
-          if [[ "$SYSTEMD" == yes && "$Chapter" == chapter06 ]]; then
-# add intltool and gperf after gettext
-            for sysFile in intltool gperf
-            do
-              FuncName=$sysFile
-              PkgName=$sysFile
-              SrcName=${PkgName}-
-              Function
-            done
-          fi
-      ;;
-      introduction|toolchaintechnotes|generalinstructions|pkgmgt|aboutdebug)
-          : # don't need any of these
-      ;;
-      kernfs)
-          if [ "$Chapters" != update ]; then
-            Output=$LFS/${ch6asroot}
+            fi
+        ;;
+        libstdc++)
+            SrcName=gcc-
             Function
-          fi
-      ;;
-      libdbus)
-          PkgName=dbus
-          SrcName=dbus-
-          Function
-      ;;
-      libstdc++)
-          SrcName=gcc-
-          Function
-      ;;
-      linux-headers|kernel)
-          SrcName=linux-
-          Function
-      ;;
-      ncurses)
-          Function
-          if [[ "$SYSTEMD" == yes && "$Chapter" == chapter06 ]]; then
-# add attr, acl and libcap after ncurses
-            for sysFile in attr acl libcap
-            do
-              FuncName=$sysFile
-              PkgName=$sysFile
-              SrcName=${PkgName}-
+        ;;
+        linux-headers|kernel)
+            SrcName=linux-
+            Function
+        ;;
+        pkgconfig)
+            PkgName=pkg-config
+            CmdName=pkg-config
+            SrcName=pkg-config-
+            Function
+        ;;
+        procps)
+            CmdName=procps-ng
+            SrcName=procps-ng-
+            Function
+        ;;
+        revisedchroot)
+            if [ "$Chapters" != update ]; then
+              Output=~/LFS-chroot.sh
+            # use this once LFS chapter06 is done, again conditionals added
+              cat ${LFS}/${ch6asroot} \
+              | awk '/mount -v/ {printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
+              >> $Output
+              WriteScript
+            fi
+        ;;
+        shadow) # as of 02/14 src file has underscore
+            SrcName=shadow_
+            Function
+        ;;
+        strippingagain)
+            if [ "$Chapters" != update ]; then
               Function
-            done
-          fi
-      ;;
-      perl)
-          Function
-          if [[ "$SYSTEMD" == yes && "$Chapter" == chapter06 ]]; then
-# add xml-parser after perl
-            for sysFile in xml-parser
-            do
-              FuncName=$( echo $sysFile | sed -e s/-//g )
-              PkgName=$sysFile
+            fi
+        ;;
+        systemd)
+            Function
+            if [[ "$SYSTEMD" = yes && "$BOOK_VERSION" != systemd ]]; then
+# add dbus after systemd
+              for sysFile in dbus; do
+                FuncName=$sysFile
+                PkgName=$sysFile
+                SrcName=$sysFile-
+                Function
+              done
+            fi
+        ;;
+        tcl)
+            SrcName=tcl8
+            Function
+        ;;
+        vim) # if updating then build the kernel after vim
+              Function
+              if [ "$Chapters" = update ]; then
+                FuncName=kernel
+                PkgName=kernel
+                SrcName=linux-
+                CmdName=kernel
+                Chapter=chapter08
+                Function
+              fi
+        ;;
+        xml-parser)
               SrcName=XML-Parser-
               Function
-            done
-          fi
-      ;;
-      pkgconfig)
-          PkgName=pkg-config
-          CmdName=pkg-config
-          SrcName=pkg-config-
-          Function
-      ;;
-      procps)
-          CmdName=procps-ng
-          SrcName=procps-ng-
-          Function
-      ;;
-      revisedchroot)
-          if [ "$Chapters" != update ]; then
-            Output=~/LFS-chroot.sh
-            # use this once LFS chapter06 is done, again conditionals added
-            cat ${LFS}/${ch6asroot} \
-            | awk '/mount -v/ {printf "if [ \"$(grep -q \""$NF"\" /proc/mounts;echo $?)\" != \"0\" ]; then\n  "$0"\nfi\n"}' \
-            >> $Output
-            WriteScript
-          fi
-      ;;
-      strippingagain)
-          if [ "$Chapters" != update ]; then
-            Function
-          fi
-      ;;
-      systemd)
-          Function
-          if [ "$SYSTEMD" = yes ]; then
-# add dbus after systemd
-            for sysFile in dbus
-            do
-              FuncName=$sysFile
-              PkgName=$sysFile
-              SrcName=$sysFile-
-              Function
-            done
-          fi
-      ;;
-      sysvinit)
-          Function
-          if [[ "$SYSTEMD" == yes && "$Chapter" == chapter06 ]]; then
-# add libdbus after sysvinit
-            for sysFile in libdbus
-            do
-              FuncName=$sysFile
-              PkgName=$sysFile
-              SrcName=dbus-
-              Function
-            done
-          fi
-      ;;
-      tcl)
-          SrcName=tcl8
-          Function
-      ;;
-      vim) # if updating then build the kernel after vim
-            Function
-            if [ "$Chapters" = update ]; then
-              FuncName=kernel
-              PkgName=kernel
-              SrcName=linux-
-              CmdName=kernel
-              Chapter=chapter08
+        ;;
+        *)
+            if [[ "$Chapter" == chapter08 && "$PkgName" == grub ]]; then #want the grub in chapter06 but not the one in chapter08
+              :
+            else
               Function
             fi
-      ;;
-      xml-parser)
-            SrcName=XML-Parser-
-            Function
-      ;;
-      xz)
-          CmdName=xz-utils
-          Function
-      ;;
-      *)
-          if [[ "$Chapter" == chapter08 && "$PkgName" == grub ]]; then #want the grub in chapter06 but not the one in chapter08
-            :
-          else
-            Function
-          fi
-      ;;
-    esac
+        ;;
+      esac
+    fi
   done
 done
 #
@@ -3265,10 +3209,20 @@ for scrpt in $scriptToArrange; do
         else
           echo $eachFunc >> $Output
         fi
+      else # not systemd
+        if [[ "$BOOK_VERSION" = BOOK ]]; then # ignore dbus 
+          if [[ "$eachFunc" = dbus_ ]]; then
+            : # don't write it
+          else 
+            echo $eachFunc >> $Output
+          fi
+        else
+          $eachFunc >> $Output
+        fi
       fi
     else # don't update coreutils, shadow and systemd. They are reinstalled in BLFS
       case $eachFunc in
-          coreutils_|shadow_|attr_|acl_|libdbus_|dbus_|gperf_|expat_|intltool_|libcap_|xmlparser_|systemd_)
+          coreutils_|shadow_|attr_|acl_|dbus_|gperf_|expat_|intltool_|libcap_|xmlparser_|systemd_)
                    continue
           ;;
           *)
@@ -3433,11 +3387,10 @@ DumpCommands $REPO $bookDir $version #parse the LFS xml
 #
 # unpack the pkguser file
 #
-pkguserFile=$PKGUSERFILE
-unpackpkguser
+unpackpkguser $PKGUSERFILE
 return_val=$?
 if [ "$return_val" -eq $RETURN_PARAM ]; then # pkguser file not present
-  echo "Package user file $pkguserFile not found in ${LFS}${sourcedir}"
+  echo "Package user file $PKGUSERFILE not found in ${LFS}${sourcedir}"
   echo "Please place it there in order to continue"
   echo "Exiting now"
   exit 1
@@ -3458,25 +3411,15 @@ version=${version%/} # remove any trailing /
 SourceDir=${SOURCEDIR}/${version}
 sourceloc=${sourcedir}/${version} # location wrt lfs system
 WgetList=${SourceDir}/${wgetlist}
-if [[ "$SYSTEMD" = yes && "$version" = BOOK ]]; then # need systemd files
-  SystemdWgetList=${SourceDir}/systemdWget-list # default name for the systemd wget-list file
-else
-  SystemdWgetList="none"
-fi
 if [ "$SOURCES" = download ]; then
   if [ ! -d $SourceDir ]; then install -v -m0755 -d $SourceDir; fi
-  if [[ "$SYSTEMD" = yes && "$version" = BOOK ]]; then # clean systemd specific files too
-    if [ -e ${LFS}/tools/${pkgFileName}/systemdSources/wget-list ]; then
-      cp ${LFS}/tools/${pkgFileName}/systemdSources/wget-list ${SourceDir}/systemdWget-list
-      SystemdWgetList=${SourceDir}/systemdWget-list
-      CleanSourceDir $SourceDir $WgetList $SystemdWgetList # clean the source files
-    fi
-  else
-    CleanSourceDir $SourceDir $WgetList $SystemdWgetList # no SystemdWgetList file
+  if [ "$CLEAN_SRC_DIR" = yes ]; then
+    CleanSourceDir $SourceDir $WgetList
   fi
   GetSource $version $SourceDir $WgetList $bookDir # download all standard LFS sources
 else
   echo "Checking if sources are in $SourceDir"
+  if [ ! -d $SourceDir ]; then mkdir -v $SourceDir; fi
 fi
 if [ ! -e $WgetList ]; then
   echo "No $wgetlist file present in $SourceDir"
@@ -3501,44 +3444,6 @@ else
         echo "okay continue"
       ;;        
     esac
-  fi
-fi
-if [[ "$SYSTEMD" = yes && "$version" = BOOK ]]; then
-  if [ "$SOURCES" = download ]; then
-# get systemd specific sources
-    if [ -e $SystemdWgetList ]; then GetSystemdSources $SourceDir $SystemdWgetList; fi
-  else
-    if [ ! -d $SourceDir ]; then install -v -m0755 -d $SourceDir; fi
-    if [ -e ${LFS}/tools/${pkgFileName}/systemdSources/wget-list ]; then
-      cp ${LFS}/tools/${pkgFileName}/systemdSources/wget-list ${SourceDir}/systemdWget-list
-      SystemdWgetList=${SourceDir}/systemdWget-list
-    fi
-  fi # download the sources
-#check that all systend specific source files are present
-  if [ -e $SystemdWgetList ]; then
-    ChkSrcPresent $SourceDir $SystemdWgetList
-    ret_val=$?
-    if [ $ret_val -eq $RETURN_PARAM ]; then
-      echo "Not all systemd files in $SystemdWgetList have been downloaded"
-      echo "You will have to download those that are missing and place them in $SourceDir"
-      echo "Do you wish to continue? (Y/n)"
-      read reply
-      case $reply in
-        [yY]|[yY][Ee][Ss])
-          echo "okay continue"
-        ;;
-        [nN]|[nN][Oo])
-          echo "Exiting now"
-          exit 1
-        ;;
-        *)
-          echo "okay continue"
-        ;;
-      esac
-    fi
-  else
-    echo "No systemd wget-list file present in $SourceDir"
-    echo "Won't be able to check if SYSTEMD specific sources exist"
   fi
 fi
 ChkEmptySrcFiles $SourceDir #check for failed downloads
@@ -3570,22 +3475,31 @@ GetPkgVersion $SourceDir systemd- tar
 systemdvers=$rtrvers
 if [ ! -z $systemdvers ]; then echo "systemd version is $systemdvers"; fi
 rtrvers=""
-GetPkgVersion $SourceDir gettext- tar
-gettextvers=$rtrvers
-if [ ! -z $gettextvers ]; then
-  echo "gettext version is $gettextvers"
-else
-  echo "*** Warning *** the /usr/share/doc/gettext dir in the configure script won't be set correctly because could not get the gettext version. Edit it yourself in chapter06.sh."
-fi
+#GetPkgVersion $SourceDir gettext- tar
+#gettextvers=$rtrvers
+#if [ ! -z $gettextvers ]; then
+#  echo "gettext version is $gettextvers"
+#else
+#  echo "*** Warning *** the /usr/share/doc/gettext dir in the configure script won't be set correctly because could not get the gettext version. Edit it yourself in chapter06.sh."
+#fi
 #
-if [ ! -e $WgetList ];then
-  echo "No $WgetList file so won't be able to check the kernel version downloaded"
-else
-  GetLinuxVersion $SourceDir $WgetList # may have downloaded a later version than that in the book
+if [[ "$WHICH_CHAPTER" = chapter08 || "$WHICH_CHAPTER" = all ]]; then
+  if [ -z $SourceDir ]; then
+    echo "Source Directory not set"
+    echo "Cannot get the version of the linux source file"
+  elif [ ! -d ${LFS}/${lfscommands}/chapter08 ]; then
+    echo "No directory ${LFS}/${lfscommands}/chapter08 present"
+    echo "Cannot get the linux version from the $lfscommands file"
+  else
+    GetLinuxVersion $SourceDir ${LFS}/${lfscommands}/chapter08 # may have downloaded a later version than that in the book
     ret_val=$?
-    if [ "$ret_val" -eq $RETURN_PARAM ]; then
+    if [ $ret_val -eq $RETURN_PARAM ]; then
       echo "**Warning** - value of Linux Src version not set"
       echo "Will not be able to compare the source version and the book version"
+    else
+      echo "Linux version of the src file is $linuxvers"
+      echo "Linux version from the commands is $linuxcomvers"
     fi
+  fi
 fi
 Start $bookDir $version # build the scripts
