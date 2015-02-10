@@ -1852,18 +1852,18 @@ EOF
              ;;
              inetutils) # ping, etc setuid root
                cat >> $Output << "EOF"
-chown root /usr/bin/ping*
-chmod 4755 /usr/bin/ping*
-chown root /usr/bin/traceroute
-chmod 4755 /usr/bin/traceroute
+chown root /bin/ping*
+chmod 4755 /bin/ping*
+chown root /bin/traceroute
+chmod 4755 /bin/traceroute
 chown root /usr/bin/{rcp,rlogin,rsh}
 chmod 4755 /usr/bin/{rcp,rlogin,rsh}
 EOF
              ;;
              util-linux) # mount setuid root
                cat >> $Output << "EOF"
-chown root /usr/bin/{mount,umount}
-chmod 4755 /usr/bin/{mount,umount}
+chown root /bin/{mount,umount}
+chmod 4755 /bin/{mount,umount}
 chown root:tty /usr/bin/wall
 chmod 2755 /usr/bin/wall
 chgrp install /usr/share/bash-completion/completions
@@ -1890,8 +1890,8 @@ fi
                cat >> $Output << "EOF"
 pwconv
 grpconv
-chown root /usr/bin/su
-chmod 4755 /usr/bin/su
+chown root /bin/su
+chmod 4755 /bin/su
 EOF
 if [ "$SYSTEMD" = yes ]; then
   echo "chown root /usr/bin/passwd
@@ -1905,7 +1905,7 @@ fi
                cat >> $Output << "EOF"
 chgrp install /usr/share/aclocal
 chmod g+w,o+t /usr/share/aclocal
-chown -h bash:bash /usr/bin/sh
+chown -h bash:bash /bin/sh
 EOF
              ;;
              man-db) #/es,it,ru
@@ -1969,8 +1969,6 @@ chgrp install /lib/udev/rules.d
 chmod g+w,o+t /lib/udev/rules.d
 chgrp install /lib/firmware
 chmod g+w,o+t /lib/firmware
-chgrp install /usr/share/gtk-doc/html
-chmod g+w,o+t /usr/share/gtk-doc/html
 EOF
              ;;
              systemd)
@@ -1999,6 +1997,12 @@ chmod g+w,o+t /usr/lib/systemd/system/multi-user.target.wants
 /usr/sbin/setcap cap_dac_override,cap_sys_ptrace=ep /usr/bin/systemd-detect-virt
 chown root:systemd-journal /var/log/journal
 chmod 2755 /var/log/journal
+EOF
+             ;;
+             sysvinit)
+               cat >> $Output << "EOF"
+rm -f /dev/initctl
+mknod -m 600 /dev/initctl p
 EOF
              ;;
              dbus)
@@ -2089,11 +2093,11 @@ EOF
          if [ "$Chapters" != update ]; then
            if [ "$SYSTEMD" = yes ]; then
              cat >> $Output << "EOF"
-rm ${PkgUserDir}/{coreutils/{.coreutils,build},dbus/build,systemd/build,shadow/{.shadow,build}} # in prep for blfs
+rm ${PkgUserDir}/{coreutils/{.coreutils,build},dbus/build,systemd/build,libcap/{.libcap,build},shadow/{.shadow,build}} # in prep for blfs
 EOF
            else
              cat >> $Output << "EOF"
-rm ${PkgUserDir}/{coreutils/{.coreutils,build},eudev/build,shadow/{.shadow,build}} # in prep for blfs
+rm ${PkgUserDir}/{coreutils/{.coreutils,build},eudev/build,libcap/{.libcap,build},shadow/{.shadow,build}} # in prep for blfs
 EOF
            fi
          fi
@@ -2108,11 +2112,11 @@ echo "$PkgName $unpacktime $elapsedtime" >> $BuildLog
 EOF
          if [ "$SYSTEMD" = yes ]; then
            cat >> $Output << "EOF"
-rm ${PkgUserDir}/{coreutils/.coreutils,shadow/.shadow} # in prep for blfs
+rm ${PkgUserDir}/{coreutils/.coreutils,libcap/.libcap,shadow/.shadow} # in prep for blfs
 EOF
          else
            cat >> $Output << "EOF"
-rm ${PkgUserDir}/{coreutils/.coreutils,eudev/.eudev,shadow/.shadow} # in prep for blfs
+rm ${PkgUserDir}/{coreutils/.coreutils,eudev/.eudev,libcap/.libcap,shadow/.shadow} # in prep for blfs
 EOF
          fi
       fi # end as_root test
@@ -2216,6 +2220,8 @@ fi"
         links=""
         if [ "$Chapters" = update ]; then
           links="/usr/bin/{mount,su,umount,wall} /usr/share/man/man1/su.1"
+        else
+          links="/sbin/nologin /usr/share/man/man8/nologin.8"
         fi
     ;;
     *)
@@ -2305,7 +2311,8 @@ EOF
 unpack () {
 starttime=$( date +%s )
 cp ${sourceloc}/${SrcName}*.* .
-cd $(tar vxf ${SrcName}[0-9].[0-9].tar.*z* | awk -F\/ 'END{print $1}')
+cp ${sourceloc}/udev-lfs-20140408.tar.bz2 .
+cd $(tar vxf ${SrcName}[0-9].[0-9].[0-9].tar.*z* | awk -F\/ 'END{print $1}')
 endtime=$( date +%s )
 set +e
 unpacktime=$( expr $endtime - $starttime )
@@ -2519,6 +2526,13 @@ else
                  -e 's/cd build/cd e2fsprogs-build/' \
            >> $Output
          fi
+    ;;
+    eudev)
+        GetCommands \
+         | sed -e 's/ -C \/usr\/share//' \
+               -e '/manpages.tar/a cp man\/man5\/udev.conf.5 \/usr\/share\/man\/man5 \ncp man\/man7/udev.7 \/usr\/share\/man\/man7 \ncp man\/man8/{udevadm.8,udevd.8} \/usr\/share\/man\/man8' \
+               -e 's/udevadm/\/sbin\/udevadm/' \
+         >> $Output
     ;;
     findutils)
         if [ "$SYSTEMD" = yes ]; then
@@ -2881,7 +2895,9 @@ fi
         if [ "$SYSTEMD" = yes ]; then
           GetInternalCommands sysvinitComms >> $Output
         else
-          GetCommands >> $Output
+          GetCommands \
+           | sed -e "/patch/a sed -i -e '#/dev/initctl#d' src/Makefile" \
+           >> $Output
         fi
     ;;
     tar)
