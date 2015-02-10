@@ -1,6 +1,6 @@
 Here is the recipe to use these scripts:
 First ensure you have these installed on your host:
-vim bison patch gawk dialog subversion xml2 xsltproc libxml2-utils, tidy, docbook-xml and docbook-xsl.
+vim bison patch gawk dialog subversion, texinfo, xml2 xsltproc libxml2-utils, tidy, docbook-xml and docbook-xsl.
 You can also change the dialog menus by using a .dialogrc in your root dir.
 go to: bash.cyberciti.biz/guide/Dialog_customization_with_configuration_file
 If you need the dialog source, it is here: ftp://invisible-island.net/dialog
